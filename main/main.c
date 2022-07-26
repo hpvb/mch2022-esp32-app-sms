@@ -36,9 +36,6 @@ static ILI9341 *ili9341 = NULL;
 extern const uint8_t rom_start[] asm("_binary_rom_sms_start");
 extern const uint8_t rom_end[] asm("_binary_rom_sms_end");
 
-extern const uint8_t background_png_start[] asm("_binary_background_png_start");
-extern const uint8_t background_png_end[] asm("_binary_background_png_end");
-
 uint64_t frames = 0;
 uint64_t dropped_frames = 0;
 
@@ -160,8 +157,7 @@ void app_main() {
   printf("!!!!!!!!!!!!!! Not A Plumber !!!!!!!!!!!!!!!!!\n");
   printf("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
 
-  printf("                         _.-*'"
-         "`*-._\n");
+  printf("                         _.-*'\"\"`*-._\n");
   printf("                _.-*'                  `*-._\n");
   printf("             .-'                            `-.\n");
   printf("  /`-.    .-'                  _.              `-.\n");
