@@ -1,0 +1,4 @@
+nvs,      data, nvs,     0x9000,   16K,
+phy_init, data, phy,     0xF000,   4K,
+factory,  app,  factory, ,  5M,
+locfd,    data, fat,     , 10M,
