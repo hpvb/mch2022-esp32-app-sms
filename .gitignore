@@ -4,3 +4,7 @@ sdkconfig.old
 *.bak
 *.old
 .vscode
+*.sms
+*.gg
+*.swp
+

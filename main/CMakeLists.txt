@@ -6,6 +6,9 @@
 idf_component_register(
     SRCS
         "main.c"
+	"totalsms/single.c"
     INCLUDE_DIRS
-        "." "include"
+        "." "include" "totalsms"
+    EMBED_FILES
+        rom.sms
 )

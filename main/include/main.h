@@ -23,8 +23,8 @@
 #include "nvs.h"
 #include "nvs_flash.h"
 // For WiFi connectivity.
-#include "wifi_connect.h"
-#include "wifi_connection.h"
+// #include "wifi_connect.h"
+// #include "wifi_connection.h"
 // For exiting to the launcher.
 #include "soc/rtc.h"
 #include "soc/rtc_cntl_reg.h"
