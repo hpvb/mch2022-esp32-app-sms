@@ -2,15 +2,18 @@
 
 This repo contains a master system emulator for the badge. It doesn't currently have a menu or SD card driver, you have to include a game with the build.
 
+# Features
+
+* It runs SEGA Master System games at around 50FPS
+
 # How to build
+Add a game as `main/rom.sms`
 
 ```
 git clone --recursive https://github.com/hpvb/mch2022-esp32-app-sms
 cd mch2022-esp32-app-sms
 make
 ```
-
-Add a game to `main/rom.sms` run `make` and it should appear on your badge!
 
 This is based on the https://github.com/badgeteam/mch2022-template-app, you can view the documentation there
 
