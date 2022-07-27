@@ -4,7 +4,10 @@ This repo contains a master system emulator for the badge. It doesn't currently 
 
 # Features
 
-* It runs SEGA Master System games at around 50FPS
+* It runs SEGA Master System games 
+* CPU runs at 100% speed
+* Only ever other frame is rendered (30 FPS)
+* Audio support
 
 # How to build
 Add a game as `main/rom.sms`
