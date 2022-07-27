@@ -6,9 +6,21 @@
 idf_component_register(
     SRCS
         "main.c"
-	"totalsms/single.c"
+        "totalsms/bus.c"
+        "totalsms/joypad.c"
+        "totalsms/psg.c"
+        "totalsms/rom_database.c"
+        "totalsms/sms.c"
+        "totalsms/vdp.c"
+        "totalsms/z80.c"
+
     INCLUDE_DIRS
         "." "include" "totalsms"
+
     EMBED_FILES
         rom.sms
+
+    LDFRAGMENTS
+        "segments.lf" 
 )
+

@@ -54,6 +54,11 @@ void SMS_set_port_b(struct SMS_Core* sms, enum SMS_PortB pin, bool down);
 
 uint32_t SMS_crc32(uint32_t crc, const void* data, size_t size);
 
+void z80_run(struct SMS_Core* sms);
+void vdp_run(struct SMS_Core* sms, const uint8_t cycles);
+void psg_run(struct SMS_Core* sms, const uint8_t cycles);
+void psg_sync(struct SMS_Core* sms);
+
 #ifdef __cplusplus
 }
 #endif

@@ -37,10 +37,11 @@ extern const uint8_t rom_start[] asm("_binary_rom_sms_start");
 extern const uint8_t rom_end[] asm("_binary_rom_sms_end");
 
 uint64_t frames = 0;
+uint64_t cpu_cycles = 0;
 uint64_t dropped_frames = 0;
 
 xQueueHandle buttonQueue;
-QueueHandle_t vidQueue;
+QueueHandle_t videoQueue;
 
 // Apparently we're not supposed to call these directly.
 esp_err_t ili9341_send(ILI9341 *device, const uint8_t *data, const int len, const bool dc_level);
@@ -54,6 +55,11 @@ void exit_to_launcher() {
 
 static struct SMS_Core *sms;
 #define BSWAP16(__x) (((((__x)&0xFF00) >> 8) | (((__x)&0xFF) << 8)))
+
+#define AUDIO_FREQ 11200
+#define AUDIO_BLOCK_SIZE 256
+uint16_t audio_write_buffer[AUDIO_BLOCK_SIZE];
+uint32_t audio_write_idx = 0;
 
 static uint32_t core_colour_callback(void *user, uint8_t r, uint8_t g, uint8_t b) {
   r <<= 6;
@@ -81,7 +87,7 @@ static void write_frame() {
 }
 
 static void core_vblank_callback(void *user) {
-  if (xQueueSend(vidQueue, &framebuffer, 5) == errQUEUE_FULL) {
+  if (xQueueSend(videoQueue, &framebuffer, 2) == errQUEUE_FULL) {
     ++dropped_frames;
   }
 
@@ -99,11 +105,11 @@ void videoTask(void *arg) {
   videoTaskIsRunning = true;
   uint16_t *param;
   while (1) {
-    xQueuePeek(vidQueue, &param, portMAX_DELAY);
+    xQueuePeek(videoQueue, &param, portMAX_DELAY);
     if (param == (uint16_t *)1)
       break;
     write_frame();
-    xQueueReceive(vidQueue, &param, portMAX_DELAY);
+    xQueueReceive(videoQueue, &param, portMAX_DELAY);
   }
   videoTaskIsRunning = false;
   vTaskDelete(NULL);
@@ -152,6 +158,78 @@ void handle_input() {
   } while (queueResult == pdTRUE);
 }
 
+void audio_init() {
+    i2s_config_t i2s_config = {
+      .mode                 = I2S_MODE_MASTER | I2S_MODE_TX,
+      .sample_rate          = AUDIO_FREQ,
+      .bits_per_sample      = I2S_BITS_PER_SAMPLE_16BIT,
+      .channel_format       = I2S_CHANNEL_FMT_RIGHT_LEFT,
+      .communication_format = I2S_COMM_FORMAT_STAND_MSB,
+      .dma_buf_count        = 8,
+      .dma_buf_len          = AUDIO_BLOCK_SIZE / 4,
+      .intr_alloc_flags     = 0,
+      .use_apll             = true,
+      .tx_desc_auto_clear   = true
+   };
+
+    i2s_driver_install(0, &i2s_config, 0, NULL);
+
+    i2s_pin_config_t pin_config = {
+      .mck_io_num = 0,
+      .bck_io_num = 4,
+      .ws_io_num = 12,
+      .data_out_num = 13,
+      .data_in_num = I2S_PIN_NO_CHANGE
+    };
+
+    i2s_set_pin(0, &pin_config);
+    i2s_set_sample_rates(0, AUDIO_FREQ);
+
+    printf("Audio initialized!\n");
+}
+
+static void core_audio_callback(void* user, struct SMS_ApuCallbackData* data) {
+  audio_write_buffer[audio_write_idx++] = (data->tone0 + data->tone1 + data->tone2 + data->noise) * 128;
+  audio_write_buffer[audio_write_idx++] = (data->tone0 + data->tone1 + data->tone2 + data->noise) * 128;
+
+  if (audio_write_idx >= AUDIO_BLOCK_SIZE) {
+    size_t count;
+    
+    i2s_write(0, audio_write_buffer, sizeof(audio_write_buffer), &count, portMAX_DELAY);
+    audio_write_idx = 0;
+  }
+
+  return;
+}
+
+void IRAM_ATTR main_loop() {
+  uint64_t start = esp_timer_get_time();
+  uint64_t end;
+
+  while (1) {
+    handle_input();
+   
+    for (size_t i = 0; i < SMS_CPU_CLOCK / 30; i += sms->cpu.cycles) {
+      z80_run(sms);
+      vdp_run(sms, sms->cpu.cycles);
+      psg_run(sms, sms->cpu.cycles);
+      cpu_cycles += sms->cpu.cycles;
+    }
+    
+    psg_sync(sms);
+
+    end = esp_timer_get_time();
+    if ((end - start) >= 1000000) {
+      printf("cpu_mhz: %.6f, fps: %lli, dropped: %lli, succeeded: %lli\n", cpu_cycles / 1000000.00, frames,
+             dropped_frames, frames - dropped_frames);
+      frames = 0;
+      cpu_cycles = 0;
+      dropped_frames = 0;
+      start = esp_timer_get_time();
+    }
+  }
+}
+
 void app_main() {
   printf("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
   printf("!!!!!!!!!!!!!! Not A Plumber !!!!!!!!!!!!!!!!!\n");
@@ -194,6 +272,9 @@ void app_main() {
   available_ram("bsp_rp2040_init");
 
   ili9341 = get_ili9341();
+
+  audio_init();
+  available_ram("audio_init");
 
   buttonQueue = get_rp2040()->queue;
   // nvs_flash_init();
@@ -241,30 +322,16 @@ void app_main() {
   available_ram("SMS_init");
 
   printf("Starting video thread\n");
-  vidQueue = xQueueCreate(1, sizeof(uint16_t *));
-  xTaskCreatePinnedToCore(&videoTask, "videoTask", 2048, NULL, 5, NULL, 1);
+  videoQueue = xQueueCreate(1, sizeof(uint16_t *));
+  xTaskCreatePinnedToCore(&videoTask, "videoTask", 1024, NULL, 5, NULL, 1);
   available_ram("videoTask");
 
   SMS_set_colour_callback(sms, core_colour_callback);
   SMS_set_vblank_callback(sms, core_vblank_callback);
+  SMS_set_apu_callback(sms, core_audio_callback, AUDIO_FREQ);
 
   SMS_set_pixels(sms, framebuffer, SMS_SCREEN_WIDTH, 2);
   SMS_loadrom(sms, rom_start, rom_end - rom_start, SMS_System_SMS);
 
-  uint64_t start = esp_timer_get_time();
-  uint64_t end;
-
-  while (1) {
-    handle_input();
-    SMS_run(sms, SMS_CPU_CLOCK / 60);
-
-    end = esp_timer_get_time();
-    if ((end - start) >= 1000000) {
-      printf("fps: %lli, dropped: %lli, succeeded: %lli\n", frames,
-             dropped_frames, frames - dropped_frames);
-      frames = 0;
-      dropped_frames = 0;
-      start = esp_timer_get_time();
-    }
-  }
+  main_loop();
 }

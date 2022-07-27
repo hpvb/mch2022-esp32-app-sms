@@ -340,10 +340,11 @@ struct SMS_Ports
 
 struct SMS_ApuCallbackData
 {
-    uint8_t tone0[2];
-    uint8_t tone1[2];
-    uint8_t tone2[2];
-    uint8_t noise[2];
+    uint8_t tone0;
+    uint8_t tone1;
+    uint8_t tone2;
+    uint8_t noise;
+    uint32_t count;
 };
 
 struct SMS_Psg

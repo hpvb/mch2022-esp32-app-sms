@@ -1,0 +1,11 @@
+[mapping:libmain]
+archive: libmain.a
+entries:
+    main (noflash)
+    bus (noflash)
+    joypad (noflash)
+    psg (noflash)
+    sms (noflash)
+    vdp (noflash)
+    z80 (noflash)
+

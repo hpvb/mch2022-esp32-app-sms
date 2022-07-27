@@ -191,25 +191,6 @@ static FORCE_INLINE uint8_t sample_channel(struct SMS_Core* sms, const uint8_t i
     return PSG.polarity[index] * (0xF - PSG.volume[index]);
 }
 
-static void sample(struct SMS_Core* sms)
-{
-    const uint8_t tone0 = sample_channel(sms, 0);
-    const uint8_t tone1 = sample_channel(sms, 1);
-    const uint8_t tone2 = sample_channel(sms, 2);
-    // the noise channel sounds louder on actual console
-    const uint8_t noise = sample_channel(sms, 3);
-
-    struct SMS_ApuCallbackData data =
-    {
-        .tone0 = { tone0 * PSG.channel_enable[0][0], tone0 * PSG.channel_enable[0][1] },
-        .tone1 = { tone1 * PSG.channel_enable[1][0], tone1 * PSG.channel_enable[1][1] },
-        .tone2 = { tone2 * PSG.channel_enable[2][0], tone2 * PSG.channel_enable[2][1] },
-        .noise = { noise * PSG.channel_enable[3][0], noise * PSG.channel_enable[3][1] },
-    };
-
-    sms->apu_callback(sms->userdata, &data);
-}
-
 // this is called on psg_reg_write() and at the end of a frame
 void psg_sync(struct SMS_Core* sms)
 {
@@ -234,10 +215,24 @@ void psg_sync(struct SMS_Core* sms)
 
         sms->apu_callback_counter += STEP;
 
+        const uint8_t tone0 = sample_channel(sms, 0);
+        const uint8_t tone1 = sample_channel(sms, 1);
+        const uint8_t tone2 = sample_channel(sms, 2);
+        // the noise channel sounds louder on actual console
+        const uint8_t noise = sample_channel(sms, 3);
+
+        struct SMS_ApuCallbackData data =
+        {
+            .tone0 = tone0,
+            .tone1 = tone1,
+            .tone2 = tone2,
+            .noise = noise,
+        };
+
         while (sms->apu_callback_counter >= sms->apu_callback_freq)
         {
             sms->apu_callback_counter -= sms->apu_callback_freq;
-            sample(sms);
+            sms->apu_callback(sms->userdata, &data);
         }
     }
 }

@@ -17,6 +17,7 @@
 #include "ili9341.h"
 // For all system settings and alike.
 #include "freertos/FreeRTOS.h"
+#include "freertos/stream_buffer.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
 #include "esp_system.h"
@@ -29,8 +30,8 @@
 #include "soc/rtc.h"
 #include "soc/rtc_cntl_reg.h"
 
-// Updates the screen with the last drawing.
-void disp_flush();
+#include "driver/i2s.h"
+#include "driver/rtc_io.h"
 
 // Exits the app, returning to the launcher.
 void exit_to_launcher();

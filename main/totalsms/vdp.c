@@ -982,8 +982,11 @@ static void vdp_advance_line_counter(struct SMS_Core* sms)
     }
 }
 
+static bool render = 1;
 static void vdp_render_frame(struct SMS_Core* sms)
 {
+    if (!render) return;
+
     // only render if display is enabled
     if (!vdp_is_display_enabled(sms))
     {
@@ -1063,7 +1066,8 @@ static void vdp_tick(struct SMS_Core* sms)
         SMS_skip_frame(sms, false);
         VDP.frame_interrupt_pending = true;
 
-        if (sms->vblank_callback)
+        render = !render; 
+        if (sms->vblank_callback && render)
         {
             sms->vblank_callback(sms->userdata);
         }
@@ -1093,6 +1097,8 @@ static void vdp_tick(struct SMS_Core* sms)
 
 void vdp_run(struct SMS_Core* sms, const uint8_t cycles)
 {
+//    vdp_tick(sms);
+//#if 0
     VDP.cycles += cycles;
 
     if (UNLIKELY(VDP.cycles >= NTSC_CYCLES_PER_LINE))
@@ -1100,6 +1106,7 @@ void vdp_run(struct SMS_Core* sms, const uint8_t cycles)
         VDP.cycles -= NTSC_CYCLES_PER_LINE;
         vdp_tick(sms);
     }
+//#endif
 }
 
 void vdp_init(struct SMS_Core* sms)

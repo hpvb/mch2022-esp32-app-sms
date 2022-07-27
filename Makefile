@@ -26,3 +26,6 @@ monitor:
 
 menuconfig:
 	source "$(IDF_PATH)/export.sh" && idf.py menuconfig
+
+size:
+	source "$(IDF_PATH)/export.sh" && idf.py size

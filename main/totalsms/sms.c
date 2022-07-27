@@ -492,15 +492,15 @@ bool SMS_loadstate(struct SMS_Core* sms, const struct SMS_State* state)
 
 bool SMS_parity16(uint16_t value)
 {
-    #if HAS_BUILTIN(__builtin_parity) && !defined(N64)
-        return !__builtin_parity(value);
-    #else
+//    #if HAS_BUILTIN(__builtin_parity) && !defined(N64)
+//        return !__builtin_parity(value);
+//    #else
         // SOURCE: https://graphics.stanford.edu/~seander/bithacks.html#ParityParallel
         value ^= value >> 8; // 16-bit
         value ^= value >> 4; // 8-bit
         value &= 0xF;
         return !((0x6996 >> value) & 0x1);
-    #endif
+//    #endif
 }
 
 bool SMS_parity8(uint8_t value)
@@ -526,5 +526,5 @@ void SMS_run(struct SMS_Core* sms, size_t cycles)
         assert(sms->cpu.cycles != 0);
     }
 
-    psg_sync(sms);
+    //psg_sync(sms);
 }
