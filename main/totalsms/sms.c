@@ -8,6 +8,7 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "esp_heap_caps.h"
 
 // not all values are listed here because the other
 // values are not used by official software and
@@ -185,6 +186,8 @@ bool SMS_init(struct SMS_Core* sms)
     }
 
     memset(sms, 0, sizeof(struct SMS_Core));
+    sms->cart.ram[0] = heap_caps_calloc(1024 * 16, 1, MALLOC_CAP_SPIRAM);
+    sms->cart.ram[1] = heap_caps_calloc(1024 * 16, 1, MALLOC_CAP_SPIRAM);
 
     return true;
 }

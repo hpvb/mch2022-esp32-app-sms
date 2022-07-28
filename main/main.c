@@ -97,9 +97,10 @@ void core_vblank_callback(void *user) {
 }
 
 static void available_ram(const char *context) {
-  printf("(%s) Available RAM: %i, Largest block: %i\n", context,
+  printf("(%s) Available DRAM: %i, Largest block: %i, Available SPIRAM: %i\n", context,
          heap_caps_get_free_size(MALLOC_CAP_8BIT | MALLOC_CAP_DMA),
-         heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DMA));
+         heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DMA),
+         heap_caps_get_free_size(MALLOC_CAP_8BIT | MALLOC_CAP_SPIRAM));
 }
 
 volatile bool videoTaskIsRunning = false;
@@ -339,8 +340,6 @@ void app_main() {
   xTaskCreatePinnedToCore(&videoTask, "videoTask", 1024, NULL, 5, NULL, 1);
   available_ram("videoTask");
 
-  heap_caps_print_heap_info(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-
   SMS_set_colour_callback(sms, core_colour_callback);
   SMS_set_vblank_callback(sms, core_vblank_callback);
   SMS_set_apu_callback(sms, core_apu_callback, AUDIO_FREQ);
@@ -358,5 +357,6 @@ void app_main() {
   SMS_loadrom(sms, rom, rom_size, SMS_System_SMS);
   printf("ROM loaded\n");
 
+  available_ram("done initializing");
   main_loop();
 }

@@ -175,7 +175,8 @@ struct SMS_Cart
     } mappers;
 
     // some games have 8-16-32KiB ram
-    uint8_t ram[2][1024 * 16];
+    //uint8_t ram[2][1024 * 16];
+    uint8_t *ram[2];
 
     uint8_t max_bank_mask;
     bool sram_used; // set when game uses sram at any point
