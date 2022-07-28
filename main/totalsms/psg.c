@@ -8,6 +8,8 @@
 
 #define PSG sms->psg
 
+extern void core_apu_callback(void* user, struct SMS_ApuCallbackData* data);
+
 #if SMS_DISBALE_AUDIO
 
 void psg_reg_write(struct SMS_Core* sms, const uint8_t value) {}
@@ -232,7 +234,7 @@ void psg_sync(struct SMS_Core* sms)
         while (sms->apu_callback_counter >= sms->apu_callback_freq)
         {
             sms->apu_callback_counter -= sms->apu_callback_freq;
-            sms->apu_callback(sms->userdata, &data);
+            core_apu_callback(sms->userdata, &data);
         }
     }
 }

@@ -61,7 +61,7 @@ static struct SMS_Core *sms;
 uint16_t audio_write_buffer[AUDIO_BLOCK_SIZE];
 uint32_t audio_write_idx = 0;
 
-static uint32_t core_colour_callback(void *user, uint8_t r, uint8_t g, uint8_t b) {
+uint32_t core_colour_callback(void *user, uint8_t r, uint8_t g, uint8_t b) {
   r <<= 6;
   g <<= 6;
   b <<= 6;
@@ -86,7 +86,7 @@ static void write_frame() {
   }
 }
 
-static void core_vblank_callback(void *user) {
+void core_vblank_callback(void *user) {
   if (xQueueSend(videoQueue, &framebuffer, 2) == errQUEUE_FULL) {
     ++dropped_frames;
   }
@@ -188,7 +188,7 @@ void audio_init() {
     printf("Audio initialized!\n");
 }
 
-static void core_audio_callback(void* user, struct SMS_ApuCallbackData* data) {
+void core_apu_callback(void* user, struct SMS_ApuCallbackData* data) {
   audio_write_buffer[audio_write_idx++] = (data->tone0 + data->tone1 + data->tone2 + data->noise) * 128;
   audio_write_buffer[audio_write_idx++] = (data->tone0 + data->tone1 + data->tone2 + data->noise) * 128;
 
@@ -326,12 +326,24 @@ void app_main() {
   xTaskCreatePinnedToCore(&videoTask, "videoTask", 1024, NULL, 5, NULL, 1);
   available_ram("videoTask");
 
+  heap_caps_print_heap_info(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+
   SMS_set_colour_callback(sms, core_colour_callback);
   SMS_set_vblank_callback(sms, core_vblank_callback);
-  SMS_set_apu_callback(sms, core_audio_callback, AUDIO_FREQ);
+  SMS_set_apu_callback(sms, core_apu_callback, AUDIO_FREQ);
 
   SMS_set_pixels(sms, framebuffer, SMS_SCREEN_WIDTH, 2);
-  SMS_loadrom(sms, rom_start, rom_end - rom_start, SMS_System_SMS);
+
+  size_t rom_size = rom_end - rom_start;
+  uint8_t* rom = heap_caps_malloc(rom_size, MALLOC_CAP_SPIRAM);
+  if (!rom) {
+    printf("Allocation of rom in SPIRAM failed. Attempted to allocate %i bytes\n", rom_size);
+  }
+  memcpy(rom, rom_start, rom_size);
+  printf("ROM copied to RAM\n");
+
+  SMS_loadrom(sms, rom, rom_size, SMS_System_SMS);
+  printf("ROM loaded\n");
 
   main_loop();
 }

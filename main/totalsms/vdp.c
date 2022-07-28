@@ -36,6 +36,9 @@ enum
     SPRITE_EOF = 208,
 };
 
+extern uint32_t core_colour_callback(void *user, uint8_t r, uint8_t g, uint8_t b);
+extern void core_vblank_callback(void *user);
+
 // SOURCE: https://www.smspower.org/forums/8161-SMSDisplayTiming
 // (divide mclks by 3)
 // 59,736 (179,208 mclks, 228x262)
@@ -852,7 +855,7 @@ static void vdp_update_sms_colours(struct SMS_Core* sms)
             const uint8_t g = (sms->vdp.cram[i] >> 2) & 0x3;
             const uint8_t b = (sms->vdp.cram[i] >> 4) & 0x3;
 
-            sms->vdp.colour[i] = sms->colour_callback(sms->userdata, r, g, b);
+            sms->vdp.colour[i] = core_colour_callback(sms->userdata, r, g, b);
             sms->vdp.dirty_cram[i] = false;
         }
     }
@@ -872,7 +875,7 @@ static void vdp_update_gg_colours(struct SMS_Core* sms)
             const uint8_t b = (sms->vdp.cram[i + 1] >> 0) & 0xF;
 
             // only 32 colours, 2 bytes per colour!
-            sms->vdp.colour[i >> 1] = sms->colour_callback(sms->userdata, r, g, b);
+            sms->vdp.colour[i >> 1] = core_colour_callback(sms->userdata, r, g, b);
             sms->vdp.dirty_cram[i] = false;
         }
     }
@@ -915,7 +918,7 @@ static void vdp_update_sg_colours(struct SMS_Core* sms)
     for (int i = 0; i < 16; i++)
     {
         const struct Colour c = SG_COLOUR_TABLE[i];
-        sms->vdp.colour[i] = sms->colour_callback(NULL, c.r, c.g, c.b);
+        sms->vdp.colour[i] = core_colour_callback(NULL, c.r, c.g, c.b);
     }
 
     sms->vdp.dirty_cram_min = sms->vdp.dirty_cram_max = 0;
@@ -1067,9 +1070,9 @@ static void vdp_tick(struct SMS_Core* sms)
         VDP.frame_interrupt_pending = true;
 
         render = !render; 
-        if (sms->vblank_callback && render)
+        if (render)
         {
-            sms->vblank_callback(sms->userdata);
+            core_vblank_callback(sms->userdata);
         }
     }
 
