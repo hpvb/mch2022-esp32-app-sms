@@ -61,6 +61,8 @@ static struct SMS_Core *sms;
 uint16_t audio_write_buffer[AUDIO_BLOCK_SIZE];
 uint32_t audio_write_idx = 0;
 
+static bool paused = false;
+
 uint32_t core_colour_callback(void *user, uint8_t r, uint8_t g, uint8_t b) {
   r <<= 6;
   g <<= 6;
@@ -115,6 +117,8 @@ void videoTask(void *arg) {
   vTaskDelete(NULL);
 }
 
+static bool select_down = false;
+
 void handle_input() {
   rp2040_input_message_t buttonMessage = {0};
   BaseType_t queueResult;
@@ -146,6 +150,11 @@ void handle_input() {
         SMS_set_port_a(sms, PAUSE_BUTTON, value);
         break;
       case RP2040_INPUT_BUTTON_SELECT:
+	if (! select_down) {
+    	  paused = !paused;
+	}
+
+	select_down = !select_down;
         break;
       case RP2040_INPUT_BUTTON_HOME:
         exit_to_launcher();
@@ -209,11 +218,15 @@ void IRAM_ATTR main_loop() {
   while (1) {
     handle_input();
    
+    if (paused) continue;
+
     for (size_t i = 0; i < SMS_CPU_CLOCK / 30; i += sms->cpu.cycles) {
       z80_run(sms);
       vdp_run(sms, sms->cpu.cycles);
       psg_run(sms, sms->cpu.cycles);
       cpu_cycles += sms->cpu.cycles;
+
+      if (paused) break;
     }
     
     psg_sync(sms);
