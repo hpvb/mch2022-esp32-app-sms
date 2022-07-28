@@ -7,5 +7,6 @@ entries:
     psg (noflash)
     sms (noflash)
     vdp (noflash)
+    videobuffer (noflash)
     z80 (noflash)
 

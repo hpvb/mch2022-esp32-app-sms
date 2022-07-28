@@ -21,6 +21,7 @@ extern "C" {
 #include <stdbool.h>
 #include <stddef.h>
 
+#include "videobuffer.h"
 #include "esp_attr.h"
 
 // fwd
@@ -414,7 +415,7 @@ struct SMS_Core
     const uint8_t* bios;
     size_t bios_size;
 
-    void* pixels;
+    videobuffer_t* pixels;
     uint16_t pitch;
     uint8_t bpp;
     bool skip_frame;

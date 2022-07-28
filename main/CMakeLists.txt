@@ -6,6 +6,7 @@
 idf_component_register(
     SRCS
         "main.c"
+	"videobuffer.c"
         "totalsms/bus.c"
         "totalsms/joypad.c"
         "totalsms/psg.c"

@@ -25,11 +25,13 @@ SOFTWARE.
 // Sega master system emulator for the MCH2022 badge platform.
 
 #include "main.h"
+#include "videobuffer.h"
 
 #include <sms.h>
 #include <string.h>
 
-static uint16_t *backbuffer[2];
+static bool current_backbuffer = 0;
+static videobuffer_t* backbuffer[2];
 static uint16_t *framebuffer = NULL;
 static ILI9341 *ili9341 = NULL;
 
@@ -73,24 +75,18 @@ uint32_t core_colour_callback(void *user, uint8_t r, uint8_t g, uint8_t b) {
 }
 
 // This avoids some safety checks and a mutex we can't afford
-static void write_frame() {
-  // ili9341_write_partial(ili9341, framebuffer, 0, 0, SMS_SCREEN_WIDTH,
-  // SMS_SCREEN_HEIGHT); ili9341_write(ili9341, framebuffer);
-  uint32_t position = 0;
-  while (SMS_SCREEN_WIDTH * SMS_SCREEN_HEIGHT * 2 - position > 0) {
-    uint32_t length = ili9341->spi_max_transfer_size;
-    
-    if (SMS_SCREEN_WIDTH * SMS_SCREEN_HEIGHT * 2 - position < ili9341->spi_max_transfer_size)
-	    length = SMS_SCREEN_WIDTH * SMS_SCREEN_HEIGHT * 2 - position;
-
-    ili9341_send(ili9341, ((uint8_t *)framebuffer) + position, length, true);
-    position += length;
+static void write_frame(bool frame) {
+  for(int i = 0; i < backbuffer[frame]->part_numb; ++i) {
+    ili9341_send(ili9341, backbuffer[frame]->parts[i], backbuffer[frame]->part_size, true);
   }
 }
 
 void core_vblank_callback(void *user) {
-  if (xQueueSend(videoQueue, &framebuffer, 2) == errQUEUE_FULL) {
+  if (xQueueSend(videoQueue, &current_backbuffer, 0) == errQUEUE_FULL) {
     ++dropped_frames;
+  } else {
+    current_backbuffer = !current_backbuffer;
+    SMS_set_pixels(sms, backbuffer[current_backbuffer], SMS_SCREEN_WIDTH, 2);
   }
 
   ++frames;
@@ -106,12 +102,10 @@ static void available_ram(const char *context) {
 volatile bool videoTaskIsRunning = false;
 void videoTask(void *arg) {
   videoTaskIsRunning = true;
-  uint16_t *param;
+  bool param;
   while (1) {
     xQueuePeek(videoQueue, &param, portMAX_DELAY);
-    if (param == (uint16_t *)1)
-      break;
-    write_frame();
+    write_frame(param);
     xQueueReceive(videoQueue, &param, portMAX_DELAY);
   }
   videoTaskIsRunning = false;
@@ -305,14 +299,6 @@ void app_main() {
                           (ILI9341_HEIGHT - SMS_SCREEN_HEIGHT) / 2,
                           SMS_SCREEN_WIDTH, SMS_SCREEN_HEIGHT);
 
-  backbuffer[0] = malloc(SMS_SCREEN_WIDTH * SMS_SCREEN_HEIGHT * 2);
-  if (!backbuffer[0]) {
-    printf("Malloc failed? Tried to allocate %i x %i @ %i (%i bytes)\n",
-           SMS_SCREEN_WIDTH, SMS_SCREEN_HEIGHT, 2,
-           (SMS_SCREEN_WIDTH * SMS_SCREEN_HEIGHT * 2));
-  }
-  available_ram("backbuffer[0]");
-
   // Not enough RAM found (yet)
 #if 0
     backbuffer[1] = malloc(SMS_SCREEN_WIDTH * SMS_SCREEN_HEIGHT * 2);
@@ -321,8 +307,6 @@ void app_main() {
     }
     available_ram("backbuffer[1]");
 #endif
-
-  framebuffer = backbuffer[0];
 
   sms = malloc(sizeof(struct SMS_Core));
   // sms = heap_caps_malloc(sizeof(struct SMS_Core), MALLOC_CAP_SPIRAM);
@@ -344,7 +328,12 @@ void app_main() {
   SMS_set_vblank_callback(sms, core_vblank_callback);
   SMS_set_apu_callback(sms, core_apu_callback, AUDIO_FREQ);
 
-  SMS_set_pixels(sms, framebuffer, SMS_SCREEN_WIDTH, 2);
+  size_t screen_size = SMS_SCREEN_WIDTH * SMS_SCREEN_HEIGHT * 2;
+  backbuffer[0] = videobuffer_allocate(SMS_SCREEN_WIDTH, SMS_SCREEN_HEIGHT, screen_size / ili9341->spi_max_transfer_size);
+  backbuffer[1] = videobuffer_allocate(SMS_SCREEN_WIDTH, SMS_SCREEN_HEIGHT, screen_size / ili9341->spi_max_transfer_size);
+  available_ram("backbuffer");
+
+  SMS_set_pixels(sms, backbuffer[0], SMS_SCREEN_WIDTH, 2);
 
   size_t rom_size = rom_end - rom_start;
   uint8_t* rom = heap_caps_malloc(rom_size, MALLOC_CAP_SPIRAM);

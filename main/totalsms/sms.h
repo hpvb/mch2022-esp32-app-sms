@@ -25,7 +25,7 @@ bool SMS_loadsave(struct SMS_Core* sms, const uint8_t* data, size_t size);
 bool SMS_used_sram(const struct SMS_Core* sms);
 
 void SMS_skip_frame(struct SMS_Core* sms, bool enable);
-void SMS_set_pixels(struct SMS_Core* sms, void* pixels, uint16_t pitch, uint8_t bpp);
+void SMS_set_pixels(struct SMS_Core* sms, videobuffer_t* pixels, uint16_t pitch, uint8_t bpp);
 void SMS_set_apu_callback(struct SMS_Core* sms, sms_apu_callback_t cb, uint32_t freq);
 void SMS_set_vblank_callback(struct SMS_Core* sms, sms_vblank_callback_t cb);
 void SMS_set_colour_callback(struct SMS_Core* sms, sms_colour_callback_t cb);

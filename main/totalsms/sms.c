@@ -397,7 +397,7 @@ bool SMS_used_sram(const struct SMS_Core* sms)
     return sms->cart.sram_used;
 }
 
-void SMS_set_pixels(struct SMS_Core* sms, void* pixels, uint16_t pitch, uint8_t bpp)
+void SMS_set_pixels(struct SMS_Core* sms, videobuffer_t* pixels, uint16_t pitch, uint8_t bpp)
 {
     sms->pixels = pixels;
     sms->pitch = pitch;

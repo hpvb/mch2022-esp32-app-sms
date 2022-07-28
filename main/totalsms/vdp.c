@@ -1008,13 +1008,15 @@ static void vdp_render_frame(struct SMS_Core* sms)
     }
 
     struct PriorityBuf prio = {0};
-    #ifndef SMS_PIXEL_WIDTH
-        //pixel_width_t scanline[SMS_SCREEN_WIDTH] = {0};
-	//pixel_width_t* scanline = ((uint16_t*)sms->pixels) + (sms->pitch * VDP.vcount) + ((ILI9341_WIDTH - SMS_SCREEN_WIDTH) / 2) + ((((ILI9341_HEIGHT - SMS_SCREEN_HEIGHT) / 2) * sms->pitch));
-        pixel_width_t* scanline = (pixel_width_t*)sms->pixels + (VDP.vcount * sms->pitch);
-    #else
-        pixel_width_t* scanline = (pixel_width_t*)sms->pixels + (VDP.vcount * sms->pitch);
-    #endif
+    //pixel_width_t scanline[SMS_SCREEN_WIDTH] = {0};
+    //pixel_width_t* scanline = ((uint16_t*)sms->pixels) + (sms->pitch * VDP.vcount) + ((ILI9341_WIDTH - SMS_SCREEN_WIDTH) / 2) + ((((ILI9341_HEIGHT - SMS_SCREEN_HEIGHT) / 2) * sms->pitch));
+    videobuffer_t* buffer = sms->pixels;
+
+    uint16_t current_part = VDP.vcount / buffer->lines_per_part;
+    pixel_width_t* part = (pixel_width_t*)buffer->parts[current_part];
+    uint16_t current_line = VDP.vcount - (current_part * buffer->lines_per_part);
+
+    pixel_width_t* scanline = part + (current_line * sms->pitch);
 
     if (SMS_is_system_type_sg(sms))
     {
@@ -1035,11 +1037,6 @@ static void vdp_render_frame(struct SMS_Core* sms)
         vdp_render_background(sms, scanline, &prio);
         vdp_render_sprites(sms, scanline, &prio);
     }
-
-    #ifndef SMS_PIXEL_WIDTH
-        //write_scanline_to_frame(sms, scanline, VDP.vcount);
-        //ili9341_write_partial_direct(ili9341, (uint8_t*) scanline, 0, VDP.vcount, SMS_SCREEN_WIDTH, 1);
-    #endif
 }
 
 static void vdp_tick(struct SMS_Core* sms)
