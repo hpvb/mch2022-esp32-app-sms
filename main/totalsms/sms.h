@@ -46,7 +46,7 @@ bool SMS_is_system_type_sms(const struct SMS_Core* sms);
 bool SMS_is_system_type_gg(const struct SMS_Core* sms);
 bool SMS_is_system_type_sg(const struct SMS_Core* sms);
 
-void SMS_get_pixel_region(const struct SMS_Core* sms, int* x, int* y, int* w, int* h);
+void SMS_get_pixel_region(int* x, int* y, int* w, int* h);
 
 // [INPUT]
 void SMS_set_port_a(struct SMS_Core* sms, enum SMS_PortA pin, bool down);
@@ -54,10 +54,10 @@ void SMS_set_port_b(struct SMS_Core* sms, enum SMS_PortB pin, bool down);
 
 uint32_t SMS_crc32(uint32_t crc, const void* data, size_t size);
 
-void z80_run(struct SMS_Core* sms);
-void vdp_run(struct SMS_Core* sms, const uint8_t cycles);
-void psg_run(struct SMS_Core* sms, const uint8_t cycles);
-void psg_sync(struct SMS_Core* sms);
+void z80_run();
+void vdp_run(const uint8_t cycles);
+void psg_run(const uint8_t cycles);
+void psg_sync();
 
 #ifdef __cplusplus
 }

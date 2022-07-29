@@ -16,6 +16,7 @@ clean:
 	rm -rf "$(BUILDDIR)"
 
 build:
+	rm -f build/rom.sms.S
 	source "$(IDF_PATH)/export.sh" && idf.py build
 
 install: build

@@ -5,23 +5,20 @@
 
 idf_component_register(
     SRCS
-        "main.c"
-	"videobuffer.c"
-        "totalsms/bus.c"
-        "totalsms/joypad.c"
-        "totalsms/psg.c"
-        "totalsms/rom_database.c"
-        "totalsms/sms.c"
-        "totalsms/vdp.c"
-        "totalsms/z80.c"
+        main.c
+        videobuffer.c
+        totalsms/single.c
 
     INCLUDE_DIRS
-        "." "include" "totalsms"
+        .
+	include
+	totalsms
 
     EMBED_FILES
         rom.sms
 
     LDFRAGMENTS
-        "segments.lf" 
+        segments.lf 
 )
 
+target_compile_options(${COMPONENT_LIB} PRIVATE -Ofast)

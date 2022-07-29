@@ -26,6 +26,7 @@ SOFTWARE.
 
 #include "main.h"
 #include "videobuffer.h"
+#include "ws2812.h"
 
 #include <sms.h>
 #include <string.h>
@@ -49,21 +50,24 @@ QueueHandle_t videoQueue;
 esp_err_t ili9341_send(ILI9341 *device, const uint8_t *data, const int len, const bool dc_level);
 esp_err_t ili9341_set_addr_window(ILI9341 *device, uint16_t x, uint16_t y, uint16_t w, uint16_t h);
 
+struct SMS_Core sms;
+
+#define AUDIO_FREQ 11200
+#define AUDIO_BLOCK_SIZE 256
+uint16_t audio_buffer[AUDIO_BLOCK_SIZE];
+uint32_t audio_idx = 0;
+
+static bool paused = false;
+
+volatile bool currently_drawing;
+
+uint8_t leds[5][3];
+
 // Exits the app, returning to the launcher.
 void exit_to_launcher() {
   REG_WRITE(RTC_CNTL_STORE0_REG, 0);
   esp_restart();
 }
-
-static struct SMS_Core *sms;
-#define BSWAP16(__x) (((((__x)&0xFF00) >> 8) | (((__x)&0xFF) << 8)))
-
-#define AUDIO_FREQ 11200
-#define AUDIO_BLOCK_SIZE 256
-uint16_t audio_write_buffer[AUDIO_BLOCK_SIZE];
-uint32_t audio_write_idx = 0;
-
-static bool paused = false;
 
 uint32_t core_colour_callback(void *user, uint8_t r, uint8_t g, uint8_t b) {
   r <<= 6;
@@ -71,25 +75,30 @@ uint32_t core_colour_callback(void *user, uint8_t r, uint8_t g, uint8_t b) {
   b <<= 6;
 
   uint16_t color = (((r & 0XF8) << 8) + ((g & 0XFC) << 3) + ((b & 0XF8) >> 3));
-  return BSWAP16(color);
+  return __builtin_bswap16(color);
 }
 
 // This avoids some safety checks and a mutex we can't afford
 static void write_frame(bool frame) {
+  currently_drawing = true;
+
   for(int i = 0; i < backbuffer[frame]->part_numb; ++i) {
     ili9341_send(ili9341, backbuffer[frame]->parts[i], backbuffer[frame]->part_size, true);
   }
+
+  currently_drawing = false;
+  ++frames;
 }
 
 void core_vblank_callback(void *user) {
+  while (currently_drawing) { }
+
   if (xQueueSend(videoQueue, &current_backbuffer, 0) == errQUEUE_FULL) {
     ++dropped_frames;
-  } else {
-    current_backbuffer = !current_backbuffer;
-    SMS_set_pixels(sms, backbuffer[current_backbuffer], SMS_SCREEN_WIDTH, 2);
   }
 
-  ++frames;
+  current_backbuffer = !current_backbuffer;
+  SMS_set_pixels(&sms, backbuffer[current_backbuffer], SMS_SCREEN_WIDTH, 2);
 }
 
 static void available_ram(const char *context) {
@@ -124,25 +133,25 @@ void handle_input() {
       bool value = buttonMessage.state;
       switch (button) {
       case RP2040_INPUT_JOYSTICK_DOWN:
-        SMS_set_port_a(sms, JOY1_DOWN_BUTTON, value);
+        SMS_set_port_a(&sms, JOY1_DOWN_BUTTON, value);
         break;
       case RP2040_INPUT_JOYSTICK_UP:
-        SMS_set_port_a(sms, JOY1_UP_BUTTON, value);
+        SMS_set_port_a(&sms, JOY1_UP_BUTTON, value);
         break;
       case RP2040_INPUT_JOYSTICK_LEFT:
-        SMS_set_port_a(sms, JOY1_LEFT_BUTTON, value);
+        SMS_set_port_a(&sms, JOY1_LEFT_BUTTON, value);
         break;
       case RP2040_INPUT_JOYSTICK_RIGHT:
-        SMS_set_port_a(sms, JOY1_RIGHT_BUTTON, value);
+        SMS_set_port_a(&sms, JOY1_RIGHT_BUTTON, value);
         break;
       case RP2040_INPUT_BUTTON_ACCEPT:
-        SMS_set_port_a(sms, JOY1_A_BUTTON, value);
+        SMS_set_port_a(&sms, JOY1_A_BUTTON, value);
         break;
       case RP2040_INPUT_BUTTON_BACK:
-        SMS_set_port_a(sms, JOY1_B_BUTTON, value);
+        SMS_set_port_a(&sms, JOY1_B_BUTTON, value);
         break;
       case RP2040_INPUT_BUTTON_START:
-        SMS_set_port_a(sms, PAUSE_BUTTON, value);
+        SMS_set_port_a(&sms, PAUSE_BUTTON, value);
         break;
       case RP2040_INPUT_BUTTON_SELECT:
 	if (! select_down) {
@@ -193,20 +202,49 @@ void audio_init() {
 }
 
 void core_apu_callback(void* user, struct SMS_ApuCallbackData* data) {
-  audio_write_buffer[audio_write_idx++] = (data->tone0 + data->tone1 + data->tone2 + data->noise) * 128;
-  audio_write_buffer[audio_write_idx++] = (data->tone0 + data->tone1 + data->tone2 + data->noise) * 128;
+  audio_buffer[audio_idx++] = (data->tone0 + data->tone1 + data->tone2 + data->noise) * 128;
+  audio_buffer[audio_idx++] = (data->tone0 + data->tone1 + data->tone2 + data->noise) * 128;
 
-  if (audio_write_idx >= AUDIO_BLOCK_SIZE) {
+  if (audio_idx >= AUDIO_BLOCK_SIZE) {
     size_t count;
     
-    i2s_write(0, audio_write_buffer, sizeof(audio_write_buffer), &count, portMAX_DELAY);
-    audio_write_idx = 0;
+    i2s_write(0, audio_buffer, sizeof(audio_buffer), &count, portMAX_DELAY);
+    audio_idx = 0;
   }
 
   return;
 }
 
-void IRAM_ATTR main_loop() {
+void sonic_leds(uint8_t lives) {
+  memset(leds, 0, sizeof(leds));
+  switch (lives) {
+        case 9: leds[3][1] = 10;
+        case 8: leds[1][1] = 10;
+        case 7: leds[2][1] = 10;
+        case 6: leds[0][1] = 10;
+        case 5: leds[4][2] = 10;
+        case 4: leds[3][2] = 10;
+        case 3: leds[1][2] = 10;
+        case 2: leds[2][2] = 10;
+        case 1: leds[0][2] = 10;
+  }
+
+  ws2812_send_data(leds, sizeof(leds));
+}
+
+void sonic1_leds() {
+  uint8_t lives = sms.system_ram[0xD246 - 0xc000];
+
+  sonic_leds(lives);
+}
+
+void sonic2_leds() {
+  uint8_t lives = sms.system_ram[0xD298 - 0xc000];
+
+  sonic_leds(lives);
+}
+
+void main_loop() {
   uint64_t start = esp_timer_get_time();
   uint64_t end;
 
@@ -215,21 +253,31 @@ void IRAM_ATTR main_loop() {
    
     if (paused) continue;
 
-    for (size_t i = 0; i < SMS_CPU_CLOCK / 30; i += sms->cpu.cycles) {
-      z80_run(sms);
-      vdp_run(sms, sms->cpu.cycles);
-      psg_run(sms, sms->cpu.cycles);
-      cpu_cycles += sms->cpu.cycles;
+    for (size_t i = 0; i < SMS_CPU_CLOCK / 60; i += sms.cpu.cycles) {
+      z80_run();
+      vdp_run(sms.cpu.cycles);
+      psg_run(sms.cpu.cycles);
+      cpu_cycles += sms.cpu.cycles;
 
       if (paused) break;
     }
     
-    psg_sync(sms);
+    psg_sync();
+
+    switch (sms.crc) {
+    case 0xB519E833:
+      sonic1_leds();
+      break;
+    case 0xD6F2BFCA:
+      sonic2_leds();
+      break;
+    }
 
     end = esp_timer_get_time();
     if ((end - start) >= 1000000) {
-      printf("cpu_mhz: %.6f, fps: %lli, dropped: %lli, succeeded: %lli\n", cpu_cycles / 1000000.00, frames,
-             dropped_frames, frames - dropped_frames);
+      printf("cpu_mhz: %.6f, fps: %lli, dropped: %lli, succeeded: %lli\n",
+	cpu_cycles / 1000000.00, frames, dropped_frames, frames - dropped_frames);
+
       frames = 0;
       cpu_cycles = 0;
       dropped_frames = 0;
@@ -243,7 +291,7 @@ void app_main() {
   printf("!!!!!!!!!!!!!! Not A Plumber !!!!!!!!!!!!!!!!!\n");
   printf("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
 
-  printf("                         _.-*'\"\"`*-._\n");
+  printf("                      _.-*'\"\"`*-._\n");
   printf("                _.-*'                  `*-._\n");
   printf("             .-'                            `-.\n");
   printf("  /`-.    .-'                  _.              `-.\n");
@@ -288,8 +336,7 @@ void app_main() {
   // nvs_flash_init();
 
   printf("Clear screen start\n");
-  framebuffer = malloc(ILI9341_WIDTH * ILI9341_HEIGHT * 2);
-  memset(framebuffer, 0xee, ILI9341_WIDTH * ILI9341_HEIGHT * 2);
+  framebuffer = heap_caps_calloc(ILI9341_WIDTH * ILI9341_HEIGHT * 2, 1, MALLOC_CAP_SPIRAM);
   ili9341_write(get_ili9341(), (uint8_t *)framebuffer);
   free(framebuffer);
   printf("Done clearing screen\n");
@@ -299,41 +346,24 @@ void app_main() {
                           (ILI9341_HEIGHT - SMS_SCREEN_HEIGHT) / 2,
                           SMS_SCREEN_WIDTH, SMS_SCREEN_HEIGHT);
 
-  // Not enough RAM found (yet)
-#if 0
-    backbuffer[1] = malloc(SMS_SCREEN_WIDTH * SMS_SCREEN_HEIGHT * 2);
-    if (!backbuffer[1]) {
-	    printf("Malloc failed? Tried to allocate %i x %i @ %i (%i bytes)\n", SMS_SCREEN_WIDTH, SMS_SCREEN_HEIGHT, 2, (SMS_SCREEN_WIDTH * SMS_SCREEN_HEIGHT * 2));
-    }
-    available_ram("backbuffer[1]");
-#endif
-
-  sms = malloc(sizeof(struct SMS_Core));
-  // sms = heap_caps_malloc(sizeof(struct SMS_Core), MALLOC_CAP_SPIRAM);
-  if (!sms) {
-    printf("Malloc failed? SMS Tried to allocate %i\n",
-           sizeof(struct SMS_Core));
-  }
-  available_ram("sms");
-
-  SMS_init(sms);
+  SMS_init(&sms);
   available_ram("SMS_init");
 
   printf("Starting video thread\n");
   videoQueue = xQueueCreate(1, sizeof(uint16_t *));
-  xTaskCreatePinnedToCore(&videoTask, "videoTask", 1024, NULL, 5, NULL, 1);
+  xTaskCreatePinnedToCore(&videoTask, "videoTask", 2048, NULL, 5, NULL, 1);
   available_ram("videoTask");
 
-  SMS_set_colour_callback(sms, core_colour_callback);
-  SMS_set_vblank_callback(sms, core_vblank_callback);
-  SMS_set_apu_callback(sms, core_apu_callback, AUDIO_FREQ);
+  SMS_set_colour_callback(&sms, core_colour_callback);
+  SMS_set_vblank_callback(&sms, core_vblank_callback);
+  SMS_set_apu_callback(&sms, core_apu_callback, AUDIO_FREQ);
 
   size_t screen_size = SMS_SCREEN_WIDTH * SMS_SCREEN_HEIGHT * 2;
   backbuffer[0] = videobuffer_allocate(SMS_SCREEN_WIDTH, SMS_SCREEN_HEIGHT, screen_size / ili9341->spi_max_transfer_size);
   backbuffer[1] = videobuffer_allocate(SMS_SCREEN_WIDTH, SMS_SCREEN_HEIGHT, screen_size / ili9341->spi_max_transfer_size);
   available_ram("backbuffer");
 
-  SMS_set_pixels(sms, backbuffer[0], SMS_SCREEN_WIDTH, 2);
+  SMS_set_pixels(&sms, backbuffer[0], SMS_SCREEN_WIDTH, 2);
 
   size_t rom_size = rom_end - rom_start;
   uint8_t* rom = heap_caps_malloc(rom_size, MALLOC_CAP_SPIRAM);
@@ -341,10 +371,12 @@ void app_main() {
     printf("Allocation of rom in SPIRAM failed. Attempted to allocate %i bytes\n", rom_size);
   }
   memcpy(rom, rom_start, rom_size);
-  printf("ROM copied to RAM\n");
+  SMS_loadrom(&sms, rom, rom_size, SMS_System_SMS);
+  printf("ROM loaded, crc: 0x%08X\n", sms.crc);
 
-  SMS_loadrom(sms, rom, rom_size, SMS_System_SMS);
-  printf("ROM loaded\n");
+  gpio_set_direction(GPIO_SD_PWR, GPIO_MODE_OUTPUT);
+  gpio_set_level(GPIO_SD_PWR, 1);
+  ws2812_init(GPIO_LED_DATA);
 
   available_ram("done initializing");
   main_loop();

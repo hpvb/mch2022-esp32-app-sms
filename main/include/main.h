@@ -10,9 +10,9 @@
 // For pin mappings.
 #include "hardware.h"
 // For graphics.
-#include "pax_gfx.h"
+// #include "pax_gfx.h"
 // For PNG images.
-#include "pax_codecs.h"
+// #include "pax_codecs.h"
 // The screen driver.
 #include "ili9341.h"
 // For all system settings and alike.
@@ -21,8 +21,8 @@
 #include "freertos/task.h"
 #include "freertos/queue.h"
 #include "esp_system.h"
-#include "nvs.h"
-#include "nvs_flash.h"
+// #include "nvs.h"
+// #include "nvs_flash.h"
 // For WiFi connectivity.
 // #include "wifi_connect.h"
 // #include "wifi_connection.h"

@@ -523,8 +523,8 @@ void SMS_run(struct SMS_Core* sms, size_t cycles)
     for (size_t i = 0; i < cycles; i += sms->cpu.cycles)
     {
         z80_run(sms);
-        vdp_run(sms, sms->cpu.cycles);
-        psg_run(sms, sms->cpu.cycles);
+        vdp_run(sms->cpu.cycles);
+        psg_run(sms->cpu.cycles);
 
         assert(sms->cpu.cycles != 0);
     }

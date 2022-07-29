@@ -14,7 +14,9 @@ videobuffer_t* videobuffer_allocate(uint16_t width, uint16_t height, short part_
 	buffer->current_part = 0;
 
 	for (int i = 0; i < part_numb; ++i) {
-		buffer->parts[i] = malloc(buffer->part_size);
+		buffer->parts[i] = calloc(buffer->part_size, 1);
+		if (!buffer->parts[i])
+			printf("Failed to allocate buffer part %i!\n", i);
 	}
 
 	return buffer;
