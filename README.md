@@ -8,6 +8,14 @@ This repo contains a master system emulator for the badge. It doesn't currently 
 * CPU runs at 100% speed
 * Only ever other frame is rendered (30 FPS)
 * Audio support
+* The border of the screen is the correct overscan color
+
+# TODO
+
+* Add a menu for settings
+* Add a cheat menu
+* Add a ROM loader menu
+* Add a way to download roms from the internet
 
 # How to build
 Add a game as `main/rom.sms`
