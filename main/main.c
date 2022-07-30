@@ -25,6 +25,7 @@ SOFTWARE.
 // Sega master system emulator for the MCH2022 badge platform.
 
 #include "main.h"
+
 #include "videobuffer.h"
 #include "ws2812.h"
 
@@ -34,7 +35,7 @@ SOFTWARE.
 static bool current_backbuffer = 0;
 static videobuffer_t* backbuffer[2];
 static uint16_t *framebuffer = NULL;
-static ILI9341 *ili9341 = NULL;
+ILI9341 *ili9341 = NULL;
 
 extern const uint8_t rom_start[] asm("_binary_rom_sms_start");
 extern const uint8_t rom_end[] asm("_binary_rom_sms_end");
@@ -123,7 +124,7 @@ void videoTask(void *arg) {
 
 static bool select_down = false;
 
-void handle_input() {
+static void handle_input() {
   rp2040_input_message_t buttonMessage = {0};
   BaseType_t queueResult;
   do {
@@ -229,7 +230,7 @@ void sonic_leds(uint8_t lives) {
         case 1: leds[0][2] = 10;
   }
 
-  ws2812_send_data(leds, sizeof(leds));
+  ws2812_send_data((uint8_t*)leds, sizeof(leds));
 }
 
 void sonic1_leds() {
@@ -244,14 +245,65 @@ void sonic2_leds() {
   sonic_leds(lives);
 }
 
+void init_screen_rect() {
+  // We set this only once, saves us some more SPI bandwidth
+  ili9341_set_addr_window(ili9341, (ILI9341_WIDTH - SMS_SCREEN_WIDTH) / 2,
+                          (ILI9341_HEIGHT - SMS_SCREEN_HEIGHT) / 2,
+                          SMS_SCREEN_WIDTH, SMS_SCREEN_HEIGHT);
+
+}
+
+#define MIN(x, y) (((x) < (y)) ? (x) : (y))
+__attribute__((always_inline)) inline void write_screen(uint8_t* buffer, size_t size) {
+  for(int i = 0; i < size / ili9341->spi_max_transfer_size + 1; ++i) {
+    size_t length = MIN(ili9341->spi_max_transfer_size, size - (i * ili9341->spi_max_transfer_size));
+    if (length) ili9341_send(ili9341, buffer, length, true);
+  }
+}
+
+void set_overscan_border(uint16_t color) {
+  while (currently_drawing) {}
+
+  for (uint32_t i = 0; i < ili9341->spi_max_transfer_size / 2; ++i) {
+    framebuffer[i] = color;
+  }
+
+  // This is not a mistake, we're in 16bpp
+  size_t top = ILI9341_WIDTH * (ILI9341_HEIGHT - SMS_SCREEN_HEIGHT);
+  size_t side = (ILI9341_WIDTH - SMS_SCREEN_WIDTH) * SMS_SCREEN_HEIGHT; 
+
+  ili9341_set_addr_window(ili9341, 0, 0, ILI9341_WIDTH, (ILI9341_HEIGHT - SMS_SCREEN_HEIGHT) / 2);
+  write_screen((uint8_t*)framebuffer, top);
+  ili9341_set_addr_window(ili9341, 0, (ILI9341_HEIGHT - (ILI9341_HEIGHT - SMS_SCREEN_HEIGHT) / 2), ILI9341_WIDTH, (ILI9341_HEIGHT - SMS_SCREEN_HEIGHT) / 2);
+  write_screen((uint8_t*)framebuffer, top);
+  ili9341_set_addr_window(ili9341, 0, (ILI9341_HEIGHT - SMS_SCREEN_HEIGHT) / 2, (ILI9341_WIDTH - SMS_SCREEN_WIDTH) / 2, ILI9341_HEIGHT - (ILI9341_HEIGHT - SMS_SCREEN_HEIGHT));
+  write_screen((uint8_t*)framebuffer, side);
+  ili9341_set_addr_window(
+      ili9341, ILI9341_WIDTH - ((ILI9341_WIDTH - SMS_SCREEN_WIDTH) / 2),
+      (ILI9341_HEIGHT - SMS_SCREEN_HEIGHT) / 2,
+      (ILI9341_WIDTH - SMS_SCREEN_WIDTH) / 2,
+      ILI9341_HEIGHT - (ILI9341_HEIGHT - SMS_SCREEN_HEIGHT)
+  );
+  write_screen((uint8_t*)framebuffer, side);
+
+  init_screen_rect();
+}
+
 void main_loop() {
   uint64_t start = esp_timer_get_time();
   uint64_t end;
 
+  uint16_t overscan_color = 0;
+  uint16_t current_overscan_color = 0;
+
   while (1) {
     handle_input();
    
-    if (paused) continue;
+    if (paused) {
+      //menu_pause();
+      //init_screen_rect();
+      continue;
+    }
 
     for (size_t i = 0; i < SMS_CPU_CLOCK / 60; i += sms.cpu.cycles) {
       z80_run();
@@ -263,6 +315,12 @@ void main_loop() {
     }
     
     psg_sync();
+
+    current_overscan_color = sms.vdp.colour[16 + (sms.vdp.registers[0x7] & 0xF)];
+    if (overscan_color != current_overscan_color) {
+      set_overscan_border(current_overscan_color);
+      overscan_color = current_overscan_color;
+    }
 
     switch (sms.crc) {
     case 0xB519E833:
@@ -276,7 +334,7 @@ void main_loop() {
     end = esp_timer_get_time();
     if ((end - start) >= 1000000) {
       printf("cpu_mhz: %.6f, fps: %lli, dropped: %lli, succeeded: %lli\n",
-	cpu_cycles / 1000000.00, frames, dropped_frames, frames - dropped_frames);
+        cpu_cycles / 1000000.00, frames, dropped_frames, frames - dropped_frames);
 
       frames = 0;
       cpu_cycles = 0;
@@ -335,16 +393,8 @@ void app_main() {
   buttonQueue = get_rp2040()->queue;
   // nvs_flash_init();
 
-  printf("Clear screen start\n");
-  framebuffer = heap_caps_calloc(ILI9341_WIDTH * ILI9341_HEIGHT * 2, 1, MALLOC_CAP_SPIRAM);
-  ili9341_write(get_ili9341(), (uint8_t *)framebuffer);
-  free(framebuffer);
-  printf("Done clearing screen\n");
-
-  // We set this only once, saves us some more SPI bandwidth
-  ili9341_set_addr_window(ili9341, (ILI9341_WIDTH - SMS_SCREEN_WIDTH) / 2,
-                          (ILI9341_HEIGHT - SMS_SCREEN_HEIGHT) / 2,
-                          SMS_SCREEN_WIDTH, SMS_SCREEN_HEIGHT);
+  framebuffer = heap_caps_malloc(ili9341->spi_max_transfer_size, MALLOC_CAP_SPIRAM);
+  set_overscan_border(0);
 
   SMS_init(&sms);
   available_ram("SMS_init");
