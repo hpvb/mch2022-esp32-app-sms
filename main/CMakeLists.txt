@@ -20,4 +20,4 @@ idf_component_register(
         segments.lf 
 )
 
-target_compile_options(${COMPONENT_LIB} PRIVATE -Ofast -fjump-tables -ftree-switch-conversion)
+target_compile_options(${COMPONENT_LIB} PRIVATE -Ofast -fjump-tables -ftree-switch-conversion -Wno-unused-function)

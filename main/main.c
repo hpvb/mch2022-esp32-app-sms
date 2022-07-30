@@ -24,28 +24,27 @@ SOFTWARE.
 
 // Sega master system emulator for the MCH2022 badge platform.
 
-#include "main.h"
-
-#include "videobuffer.h"
-#include "ws2812.h"
-
-#include <sms.h>
 #include <string.h>
 
-static bool current_backbuffer = 0;
-static videobuffer_t* backbuffer[2];
-static uint16_t *framebuffer = NULL;
-ILI9341 *ili9341 = NULL;
+#include "main.h"
+#include "videobuffer.h"
+#include "ws2812.h"
+#include "sms.h"
 
 extern const uint8_t rom_start[] asm("_binary_rom_sms_start");
 extern const uint8_t rom_end[] asm("_binary_rom_sms_end");
 
-uint64_t frames = 0;
-uint64_t cpu_cycles = 0;
-uint64_t dropped_frames = 0;
+static bool current_backbuffer = 0;
+videobuffer_t* backbuffer[2];
+static uint16_t *framebuffer = NULL;
 
-xQueueHandle buttonQueue;
-QueueHandle_t videoQueue;
+static uint64_t frames = 0;
+static uint64_t cpu_cycles = 0;
+static uint64_t dropped_frames = 0;
+
+static xQueueHandle buttonQueue;
+static QueueHandle_t videoQueue;
+ILI9341 *ili9341 = NULL;
 
 // Apparently we're not supposed to call these directly.
 esp_err_t ili9341_send(ILI9341 *device, const uint8_t *data, const int len, const bool dc_level);
@@ -53,16 +52,7 @@ esp_err_t ili9341_set_addr_window(ILI9341 *device, uint16_t x, uint16_t y, uint1
 
 struct SMS_Core sms;
 
-#define AUDIO_FREQ 11200
-#define AUDIO_BLOCK_SIZE 256
-uint16_t audio_buffer[AUDIO_BLOCK_SIZE];
-uint32_t audio_idx = 0;
-
 static bool paused = false;
-
-volatile bool currently_drawing;
-
-uint8_t leds[5][3];
 
 // Exits the app, returning to the launcher.
 void exit_to_launcher() {
@@ -70,17 +60,14 @@ void exit_to_launcher() {
   esp_restart();
 }
 
+// We get 6 bit RGB values, pack them into a byte swapped RGB565 value
 __attribute__((always_inline)) inline uint32_t core_colour_callback(void *user, uint8_t r, uint8_t g, uint8_t b) {
-  r <<= 6;
-  g <<= 6;
-  b <<= 6;
-
-  uint16_t color = (((r & 0XF8) << 8) + ((g & 0XFC) << 3) + ((b & 0XF8) >> 3));
-  return __builtin_bswap16(color);
+  return __builtin_bswap16(((((r << 6 ) & 0xF8) << 8) + (((g << 6) & 0xFC) << 3) + (((b << 6) & 0xF8) >> 3)));
 }
 
+volatile bool currently_drawing;
 // This avoids some safety checks and a mutex we can't afford
-static void write_frame(bool frame) {
+__attribute__((always_inline)) inline static void write_frame(bool frame) {
   currently_drawing = true;
   ili9341->dc_level = true;
 
@@ -107,14 +94,7 @@ __attribute__((always_inline)) inline void core_vblank_callback(void *user) {
   }
 
   current_backbuffer = !current_backbuffer;
-  SMS_set_pixels(&sms, backbuffer[current_backbuffer], SMS_SCREEN_WIDTH, 2);
-}
-
-static void available_ram(const char *context) {
-  printf("(%s) Available DRAM: %i, Largest block: %i, Available SPIRAM: %i\n", context,
-         heap_caps_get_free_size(MALLOC_CAP_8BIT | MALLOC_CAP_DMA),
-         heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DMA),
-         heap_caps_get_free_size(MALLOC_CAP_8BIT | MALLOC_CAP_SPIRAM));
+  sms.pixels = backbuffer[current_backbuffer];
 }
 
 volatile bool videoTaskIsRunning = false;
@@ -180,6 +160,11 @@ static void handle_input() {
   } while (queueResult == pdTRUE);
 }
 
+#define AUDIO_FREQ 11200
+#define AUDIO_BLOCK_SIZE 256
+static uint16_t audio_buffer[AUDIO_BLOCK_SIZE];
+static uint32_t audio_idx = 0;
+
 void audio_init() {
     i2s_config_t i2s_config = {
       .mode                 = I2S_MODE_MASTER | I2S_MODE_TX,
@@ -197,11 +182,11 @@ void audio_init() {
     i2s_driver_install(0, &i2s_config, 0, NULL);
 
     i2s_pin_config_t pin_config = {
-      .mck_io_num = 0,
-      .bck_io_num = 4,
-      .ws_io_num = 12,
+      .mck_io_num   = 0,
+      .bck_io_num   = 4,
+      .ws_io_num    = 12,
       .data_out_num = 13,
-      .data_in_num = I2S_PIN_NO_CHANGE
+      .data_in_num  = I2S_PIN_NO_CHANGE
     };
 
     i2s_set_pin(0, &pin_config);
@@ -211,8 +196,9 @@ void audio_init() {
 }
 
 __attribute__((always_inline)) inline void core_apu_callback(void* user, struct SMS_ApuCallbackData* data) {
-  audio_buffer[audio_idx++] = (data->tone0 + data->tone1 + data->tone2 + data->noise) * 128;
-  audio_buffer[audio_idx++] = (data->tone0 + data->tone1 + data->tone2 + data->noise) * 128;
+  uint16_t sample = (data->tone0 + data->tone1 + data->tone2 + data->noise) * 128;
+  audio_buffer[audio_idx++] = sample;
+  audio_buffer[audio_idx++] = sample;
 
   if (audio_idx >= AUDIO_BLOCK_SIZE) {
     size_t count;
@@ -224,30 +210,32 @@ __attribute__((always_inline)) inline void core_apu_callback(void* user, struct 
   return;
 }
 
-void sonic_leds(uint8_t lives) {
+static uint8_t leds[5][3];
+
+static void sonic_leds(uint8_t lives) {
   memset(leds, 0, sizeof(leds));
   switch (lives) {
-        case 9: leds[3][1] = 10;
-        case 8: leds[1][1] = 10;
-        case 7: leds[2][1] = 10;
-        case 6: leds[0][1] = 10;
-        case 5: leds[4][2] = 10;
-        case 4: leds[3][2] = 10;
-        case 3: leds[1][2] = 10;
-        case 2: leds[2][2] = 10;
-        case 1: leds[0][2] = 10;
+    case 9: leds[3][1] = 10;
+    case 8: leds[1][1] = 10;
+    case 7: leds[2][1] = 10;
+    case 6: leds[0][1] = 10;
+    case 5: leds[4][2] = 10;
+    case 4: leds[3][2] = 10;
+    case 3: leds[1][2] = 10;
+    case 2: leds[2][2] = 10;
+    case 1: leds[0][2] = 10;
   }
 
   ws2812_send_data((uint8_t*)leds, sizeof(leds));
 }
 
-void sonic1_leds() {
+static void sonic1_leds() {
   uint8_t lives = sms.system_ram[0xD246 - 0xc000];
 
   sonic_leds(lives);
 }
 
-void sonic2_leds() {
+static void sonic2_leds() {
   uint8_t lives = sms.system_ram[0xD298 - 0xc000];
 
   sonic_leds(lives);
@@ -287,14 +275,22 @@ void set_overscan_border(uint16_t color) {
   ili9341_set_addr_window(ili9341, 0, (ILI9341_HEIGHT - SMS_SCREEN_HEIGHT) / 2, (ILI9341_WIDTH - SMS_SCREEN_WIDTH) / 2, ILI9341_HEIGHT - (ILI9341_HEIGHT - SMS_SCREEN_HEIGHT));
   write_screen((uint8_t*)framebuffer, side);
   ili9341_set_addr_window(
-      ili9341, ILI9341_WIDTH - ((ILI9341_WIDTH - SMS_SCREEN_WIDTH) / 2),
-      (ILI9341_HEIGHT - SMS_SCREEN_HEIGHT) / 2,
-      (ILI9341_WIDTH - SMS_SCREEN_WIDTH) / 2,
-      ILI9341_HEIGHT - (ILI9341_HEIGHT - SMS_SCREEN_HEIGHT)
+    ili9341, ILI9341_WIDTH - ((ILI9341_WIDTH - SMS_SCREEN_WIDTH) / 2),
+    (ILI9341_HEIGHT - SMS_SCREEN_HEIGHT) / 2,
+    (ILI9341_WIDTH - SMS_SCREEN_WIDTH) / 2,
+    ILI9341_HEIGHT - (ILI9341_HEIGHT - SMS_SCREEN_HEIGHT)
   );
   write_screen((uint8_t*)framebuffer, side);
 
   init_screen_rect();
+}
+
+static void available_ram(const char *context) {
+  printf("(%s) Available DRAM: %i, Largest block: %i, Available SPIRAM: %i\n",
+      context,
+      heap_caps_get_free_size(MALLOC_CAP_8BIT | MALLOC_CAP_DMA),
+      heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DMA),
+      heap_caps_get_free_size(MALLOC_CAP_8BIT | MALLOC_CAP_SPIRAM));
 }
 
 void main_loop() {
