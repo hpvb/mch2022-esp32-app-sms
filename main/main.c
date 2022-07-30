@@ -70,7 +70,7 @@ void exit_to_launcher() {
   esp_restart();
 }
 
-uint32_t core_colour_callback(void *user, uint8_t r, uint8_t g, uint8_t b) {
+__attribute__((always_inline)) inline uint32_t core_colour_callback(void *user, uint8_t r, uint8_t g, uint8_t b) {
   r <<= 6;
   g <<= 6;
   b <<= 6;
@@ -91,7 +91,7 @@ static void write_frame(bool frame) {
   ++frames;
 }
 
-void core_vblank_callback(void *user) {
+__attribute__((always_inline)) inline void core_vblank_callback(void *user) {
   while (currently_drawing) { }
 
   if (xQueueSend(videoQueue, &current_backbuffer, 0) == errQUEUE_FULL) {
@@ -202,7 +202,7 @@ void audio_init() {
     printf("Audio initialized!\n");
 }
 
-void core_apu_callback(void* user, struct SMS_ApuCallbackData* data) {
+__attribute__((always_inline)) inline void core_apu_callback(void* user, struct SMS_ApuCallbackData* data) {
   audio_buffer[audio_idx++] = (data->tone0 + data->tone1 + data->tone2 + data->noise) * 128;
   audio_buffer[audio_idx++] = (data->tone0 + data->tone1 + data->tone2 + data->noise) * 128;
 

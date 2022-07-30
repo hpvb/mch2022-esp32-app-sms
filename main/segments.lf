@@ -1,14 +1,7 @@
 [mapping:libmain]
 archive: libmain.a
 entries:
-    main (noflash)
-    bus (noflash)
-    joypad (noflash)
-    psg (noflash)
-    sms (noflash)
-    vdp (noflash)
-    videobuffer (noflash)
-    z80 (noflash)
+    fakelto (noflash)
 
 [mapping:ili9341]
 archive: libspi-ili9341.a

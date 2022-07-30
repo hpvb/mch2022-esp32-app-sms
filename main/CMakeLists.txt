@@ -5,9 +5,8 @@
 
 idf_component_register(
     SRCS
-        main.c
-        videobuffer.c
-        totalsms/single.c
+        fakelto.c
+        totalsms/rom_database.c
 
     INCLUDE_DIRS
         .
@@ -21,4 +20,4 @@ idf_component_register(
         segments.lf 
 )
 
-target_compile_options(${COMPONENT_LIB} PRIVATE -Ofast)
+target_compile_options(${COMPONENT_LIB} PRIVATE -Ofast -fjump-tables -ftree-switch-conversion)

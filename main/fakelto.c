@@ -4,3 +4,6 @@
 #include "sms.c"
 #include "psg.c"
 #include "vdp.c"
+
+#include "main.c"
+#include "videobuffer.c"
