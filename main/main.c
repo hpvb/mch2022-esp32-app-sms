@@ -41,6 +41,7 @@ static uint16_t *framebuffer = NULL;
 static uint64_t frames = 0;
 static uint64_t cpu_cycles = 0;
 static uint64_t dropped_frames = 0;
+static uint64_t frame_time = 0;
 
 static xQueueHandle buttonQueue;
 static QueueHandle_t videoQueue;
@@ -71,6 +72,9 @@ __attribute__((always_inline)) inline static void write_frame(bool frame) {
   currently_drawing = true;
   ili9341->dc_level = true;
 
+  uint64_t start = esp_timer_get_time();
+  uint64_t end;
+
   spi_transaction_t transaction = {
     .length = backbuffer[frame]->part_size * 8,
     .tx_buffer = NULL,
@@ -80,10 +84,15 @@ __attribute__((always_inline)) inline static void write_frame(bool frame) {
   for(int i = 0; i < backbuffer[frame]->part_numb; ++i) {
     transaction.tx_buffer = backbuffer[frame]->parts[i];
     spi_device_polling_transmit(ili9341->spi_device, &transaction);
+    ets_delay_us(10);
   }
 
   currently_drawing = false;
   ++frames;
+
+  end = esp_timer_get_time();
+
+  frame_time += end - start;
 }
 
 __attribute__((always_inline)) inline void core_vblank_callback(void *user) {
@@ -337,8 +346,8 @@ void main_loop() {
 
     end = esp_timer_get_time();
     if ((end - start) >= 1000000) {
-      printf("cpu_mhz: %.6f, fps: %lli, dropped: %lli, succeeded: %lli\n",
-        cpu_cycles / 1000000.00, frames, dropped_frames, frames - dropped_frames);
+      printf("cpu_mhz: %.6f, fps: %lli, dropped: %lli, avg_frametime: %lli\n",
+        cpu_cycles / 1000000.00, frames, dropped_frames, frame_time / frames);
 
       if (cpu_cycles < 3579545)
         set_overscan_border(0x00f0);
@@ -348,6 +357,7 @@ void main_loop() {
       frames = 0;
       cpu_cycles = 0;
       dropped_frames = 0;
+      frame_time = 0;
       start = esp_timer_get_time();
     }
   }
@@ -418,8 +428,8 @@ void app_main() {
   SMS_set_apu_callback(&sms, core_apu_callback, AUDIO_FREQ);
 
   size_t screen_size = SMS_SCREEN_WIDTH * SMS_SCREEN_HEIGHT * 2;
-  backbuffer[0] = videobuffer_allocate(SMS_SCREEN_WIDTH, SMS_SCREEN_HEIGHT, screen_size / ili9341->spi_max_transfer_size);
-  backbuffer[1] = videobuffer_allocate(SMS_SCREEN_WIDTH, SMS_SCREEN_HEIGHT, screen_size / ili9341->spi_max_transfer_size);
+  backbuffer[0] = videobuffer_allocate(SMS_SCREEN_WIDTH, SMS_SCREEN_HEIGHT, screen_size / 6144);
+  backbuffer[1] = videobuffer_allocate(SMS_SCREEN_WIDTH, SMS_SCREEN_HEIGHT, screen_size / 6144);
   available_ram("backbuffer");
 
   SMS_set_pixels(&sms, backbuffer[0], SMS_SCREEN_WIDTH, 2);
@@ -438,5 +448,6 @@ void app_main() {
   ws2812_init(GPIO_LED_DATA);
 
   available_ram("done initializing");
+
   main_loop();
 }
