@@ -336,6 +336,11 @@ void main_loop() {
       printf("cpu_mhz: %.6f, fps: %lli, dropped: %lli, succeeded: %lli\n",
         cpu_cycles / 1000000.00, frames, dropped_frames, frames - dropped_frames);
 
+      if (cpu_cycles < 3579545)
+        set_overscan_border(0x00f0);
+      else
+        set_overscan_border(current_overscan_color);
+
       frames = 0;
       cpu_cycles = 0;
       dropped_frames = 0;
@@ -400,8 +405,8 @@ void app_main() {
   available_ram("SMS_init");
 
   printf("Starting video thread\n");
-  videoQueue = xQueueCreate(1, sizeof(uint16_t *));
-  xTaskCreatePinnedToCore(&videoTask, "videoTask", 2048, NULL, 5, NULL, 1);
+  videoQueue = xQueueCreate(2, sizeof(uint16_t *));
+  xTaskCreatePinnedToCore(&videoTask, "videoTask", 2048, NULL, 5, NULL, 0);
   available_ram("videoTask");
 
   SMS_set_colour_callback(&sms, core_colour_callback);
