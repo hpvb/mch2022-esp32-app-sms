@@ -82,9 +82,17 @@ __attribute__((always_inline)) inline uint32_t core_colour_callback(void *user, 
 // This avoids some safety checks and a mutex we can't afford
 static void write_frame(bool frame) {
   currently_drawing = true;
+  ili9341->dc_level = true;
+
+  spi_transaction_t transaction = {
+    .length = backbuffer[frame]->part_size * 8,
+    .tx_buffer = NULL,
+    .user = (void*)ili9341,
+  };
 
   for(int i = 0; i < backbuffer[frame]->part_numb; ++i) {
-    ili9341_send(ili9341, backbuffer[frame]->parts[i], backbuffer[frame]->part_size, true);
+    transaction.tx_buffer = backbuffer[frame]->parts[i];
+    spi_device_polling_transmit(ili9341->spi_device, &transaction);
   }
 
   currently_drawing = false;
@@ -405,7 +413,7 @@ void app_main() {
   available_ram("SMS_init");
 
   printf("Starting video thread\n");
-  videoQueue = xQueueCreate(2, sizeof(uint16_t *));
+  videoQueue = xQueueCreate(1, sizeof(uint16_t *));
   xTaskCreatePinnedToCore(&videoTask, "videoTask", 2048, NULL, 5, NULL, 0);
   available_ram("videoTask");
 
