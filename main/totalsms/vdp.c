@@ -991,7 +991,7 @@ static void vdp_advance_line_counter()
 
 static void vdp_render_frame()
 {
-    if (frameno % 2) return;
+    //if (frameno % 2) return;
 
     // only render if display is enabled
     if (!vdp_is_display_enabled())
@@ -1069,7 +1069,7 @@ static void vdp_tick()
         SMS_skip_frame(&sms, false);
         VDP.frame_interrupt_pending = true;
 
-        if (frameno % 2 == 0)
+        //if (frameno % 2 == 0)
         {
             core_vblank_callback(&sms.userdata);
 	    if (frameno >= 60) frameno = 0;

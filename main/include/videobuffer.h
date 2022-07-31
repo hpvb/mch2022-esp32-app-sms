@@ -5,6 +5,7 @@
 typedef struct videobuffer {
 	size_t size; // size of the total buffer
 
+	uint8_t **real_parts; // frame buffer parts
 	uint8_t **parts; // frame buffer parts
 	size_t part_size; // size of individual parts
 	short part_numb; // number of parts

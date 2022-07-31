@@ -15,6 +15,7 @@ idf_component_register(
 
     EMBED_FILES
         rom.sms
+        lcd_controller.bin
 
     LDFRAGMENTS
         segments.lf 

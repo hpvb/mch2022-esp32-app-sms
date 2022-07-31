@@ -34,6 +34,9 @@ SOFTWARE.
 extern const uint8_t rom_start[] asm("_binary_rom_sms_start");
 extern const uint8_t rom_end[] asm("_binary_rom_sms_end");
 
+extern const uint8_t lcd_controller_start[] asm("_binary_lcd_controller_bin_start");
+extern const uint8_t lcd_controller_end[] asm("_binary_lcd_controller_bin_end");
+
 static bool current_backbuffer = 0;
 videobuffer_t* backbuffer[2];
 static uint16_t *framebuffer = NULL;
@@ -46,14 +49,83 @@ static uint64_t frame_time = 0;
 static xQueueHandle buttonQueue;
 static QueueHandle_t videoQueue;
 ILI9341 *ili9341 = NULL;
+ICE40 *ice40 = NULL;
 
 // Apparently we're not supposed to call these directly.
 esp_err_t ili9341_send(ILI9341 *device, const uint8_t *data, const int len, const bool dc_level);
 esp_err_t ili9341_set_addr_window(ILI9341 *device, uint16_t x, uint16_t y, uint16_t w, uint16_t h);
+void ili9341_set_lcd_mode(bool mode);
 
 struct SMS_Core sms;
 
 static bool paused = false;
+
+static const uint8_t lcd_init_data[] = {
+   0xf2,
+   3, 0xef, 0x03, 0x80, 0x02,             // ? (undocumented cmd)
+   3, 0xcf, 0x00, 0xc1, 0x30,             // Power control B
+   4, 0xed, 0x64, 0x03, 0x12, 0x81,       // Power on sequence control
+   3, 0xe8, 0x85, 0x00, 0x78,             // Driver timing control A
+   5, 0xcb, 0x39, 0x2c, 0x00, 0x34, 0x02, // Power control A
+   1, 0xf7, 0x20,                         // Pump ratio control
+   2, 0xea, 0x00, 0x00,                   // Driver timing control B
+   1, 0xc0, 0x23,                         // Power control 1
+   1, 0xc1, 0x10,                         // Power control 2
+   2, 0xc5, 0x3e, 0x28,                   // VCOM Control 1
+   1, 0xc7, 0x86,                         // VCOM Control 2
+   1, 0x3a, 0x55,                         // Pixel Format: 16b
+   3, 0xb6, 0x08, 0x82, 0x27,             // Display Function Control
+   1, 0xf2, 0x00,                         // 3 Gamma control disable
+   1, 0x26, 0x01,                         // Gamma Set
+  15, 0xe0, 0x0f, 0x31, 0x2b, 0x0c, 0x0e, // Positive Gamma Correction
+            0x08, 0x4e, 0xf1, 0x37, 0x07,
+            0x10, 0x03, 0x0e, 0x09, 0x00,
+  15, 0xe1, 0x00, 0x0e, 0x14, 0x03, 0x11, // Negative Gamma Correction
+            0x07, 0x31, 0xc1, 0x48, 0x08,
+            0x0f, 0x0c, 0x31, 0x36, 0x0f,
+   0, 0x11,                               // Sleep Out
+   0, 0x29,                               // Display ON
+   1, 0x35, 0x00,                         // Tearing Effect Line ON
+   1, 0x36, 0x28,                         // Memory Access Control
+   4, 0x2a, 0x00, 0x00, 0x01, 0x3f,       // Column Address Set
+   4, 0x2b, 0x00, 0x00, 0x00, 0xef,       // Page Address Set
+   0, 0x2c,
+};
+
+void lcd_send_command(uint8_t cmd, const uint8_t* data, uint8_t size) {
+  uint8_t packet[64];
+  memset(packet, 0, sizeof(packet));
+  packet[0] = 0xf2;
+  packet[1] = size;
+  packet[2] = cmd;
+
+  for(int i = 0; i < size; ++i) {
+    packet[3 + i] = data[i];
+  }
+  
+  printf("Sending packet: ");
+  for(int i = 0; i < size + 3; ++i) {
+    printf("0x%x ", packet[i]);
+  }
+  printf("\n");
+
+  ice40_send(ice40, packet, size + 3);
+}
+
+void init_lcd() {
+  printf("Loading ICE40 bitstream from %p, size %i\n", lcd_controller_start, lcd_controller_end - lcd_controller_start);
+  ice40_load_bitstream(ice40, lcd_controller_start, lcd_controller_end - lcd_controller_start);
+  printf("ICE40 bitstream loaded\n");
+
+  printf("Switching LCD to ICE40\n");
+  ili9341_deinit(ili9341);
+  //ili9341_set_lcd_mode(true);
+  printf("Done LCD to ICE40\n");
+
+  printf("Sending LCD init data\n");
+  ice40_send(ice40, lcd_init_data, sizeof(lcd_init_data));
+  printf("Done sending LCD init data\n");
+}
 
 // Exits the app, returning to the launcher.
 void exit_to_launcher() {
@@ -66,25 +138,47 @@ __attribute__((always_inline)) inline uint32_t core_colour_callback(void *user, 
   return __builtin_bswap16(((((r << 6 ) & 0xF8) << 8) + (((g << 6) & 0xFC) << 3) + (((b << 6) & 0xF8) >> 3)));
 }
 
+void init_screen_rect() {
+  // We set this only once, saves us some more SPI bandwidth
+  ili9341_set_addr_window(ili9341, (ILI9341_WIDTH - SMS_SCREEN_WIDTH) / 2,
+                          (ILI9341_HEIGHT - SMS_SCREEN_HEIGHT) / 2,
+                          SMS_SCREEN_WIDTH, SMS_SCREEN_HEIGHT);
+
+}
+
 volatile bool currently_drawing;
 // This avoids some safety checks and a mutex we can't afford
 __attribute__((always_inline)) inline static void write_frame(bool frame) {
   currently_drawing = true;
-  ili9341->dc_level = true;
+  //ili9341->dc_level = true;
 
   uint64_t start = esp_timer_get_time();
   uint64_t end;
 
-  spi_transaction_t transaction = {
-    .length = backbuffer[frame]->part_size * 8,
-    .tx_buffer = NULL,
-    .user = (void*)ili9341,
-  };
+  //spi_transaction_t transaction = {
+  //  .length = backbuffer[frame]->part_size * 8,
+  //  .tx_buffer = NULL,
+  //  .user = (void*)ili9341,
+  //};
 
+  //send_cmd(0x45);
   for(int i = 0; i < backbuffer[frame]->part_numb; ++i) {
-    transaction.tx_buffer = backbuffer[frame]->parts[i];
-    spi_device_polling_transmit(ili9341->spi_device, &transaction);
-    ets_delay_us(10);
+    //for(int z = 0; z < (backbuffer[frame]->part_size / 64); ++z) {
+      //transaction.tx_buffer = backbuffer[frame]->parts[i];
+      //transaction.tx_buffer = backbuffer[frame]->parts[i] + (z * 64);
+      //ili9341_set_addr_window(ili9341, (ILI9341_WIDTH - SMS_SCREEN_WIDTH) / 2, (i * backbuffer[frame]->lines_per_part) + ((ILI9341_HEIGHT - SMS_SCREEN_HEIGHT) / 2), SMS_SCREEN_WIDTH, backbuffer[frame]->lines_per_part);
+      //ili9341->dc_level = true;
+      //spi_device_polling_transmit(ili9341->spi_device, &transaction);
+      //ramrw(10);
+      //init_screen_rect();
+      //ets_delay_us(10);
+    //}
+    //printf("Sending: %x %x %x %x\n", (((uint8_t*)backbuffer[frame]->parts[i]) - 1)[0],
+    //    (((uint8_t*)backbuffer[frame]->parts[i]) - 1)[1],
+    //    (((uint8_t*)backbuffer[frame]->parts[i]) - 1)[2],
+    //    (((uint8_t*)backbuffer[frame]->parts[i]) - 1)[3]);
+
+    ice40_send_turbo(ice40, ((uint8_t*)backbuffer[frame]->parts[i]) - 1, backbuffer[frame]->part_size + 1);
   }
 
   currently_drawing = false;
@@ -102,7 +196,7 @@ __attribute__((always_inline)) inline void core_vblank_callback(void *user) {
     ++dropped_frames;
   }
 
-  current_backbuffer = !current_backbuffer;
+  //current_backbuffer = !current_backbuffer;
   sms.pixels = backbuffer[current_backbuffer];
 }
 
@@ -250,14 +344,6 @@ static void sonic2_leds() {
   sonic_leds(lives);
 }
 
-void init_screen_rect() {
-  // We set this only once, saves us some more SPI bandwidth
-  ili9341_set_addr_window(ili9341, (ILI9341_WIDTH - SMS_SCREEN_WIDTH) / 2,
-                          (ILI9341_HEIGHT - SMS_SCREEN_HEIGHT) / 2,
-                          SMS_SCREEN_WIDTH, SMS_SCREEN_HEIGHT);
-
-}
-
 #define MIN(x, y) (((x) < (y)) ? (x) : (y))
 __attribute__((always_inline)) inline void write_screen(uint8_t* buffer, size_t size) {
   for(int i = 0; i < size / ili9341->spi_max_transfer_size + 1; ++i) {
@@ -321,17 +407,17 @@ void main_loop() {
     for (size_t i = 0; i < SMS_CPU_CLOCK / 60; i += sms.cpu.cycles) {
       z80_run();
       vdp_run(sms.cpu.cycles);
-      psg_run(sms.cpu.cycles);
+      //psg_run(sms.cpu.cycles);
       cpu_cycles += sms.cpu.cycles;
 
       if (paused) break;
     }
     
-    psg_sync();
+    //psg_sync();
 
     current_overscan_color = sms.vdp.colour[16 + (sms.vdp.registers[0x7] & 0xF)];
     if (overscan_color != current_overscan_color) {
-      set_overscan_border(current_overscan_color);
+      //set_overscan_border(current_overscan_color);
       overscan_color = current_overscan_color;
     }
 
@@ -349,10 +435,12 @@ void main_loop() {
       printf("cpu_mhz: %.6f, fps: %lli, dropped: %lli, avg_frametime: %lli\n",
         cpu_cycles / 1000000.00, frames, dropped_frames, frame_time / frames);
 
+#if 0
       if (cpu_cycles < 3579545)
         set_overscan_border(0x00f0);
       else
         set_overscan_border(current_overscan_color);
+#endif
 
       frames = 0;
       cpu_cycles = 0;
@@ -404,7 +492,11 @@ void app_main() {
   bsp_rp2040_init();
   available_ram("bsp_rp2040_init");
 
+  bsp_ice40_init();
+  available_ram("bsp_ice40_init");
+
   ili9341 = get_ili9341();
+  ice40 = get_ice40();
 
   audio_init();
   available_ram("audio_init");
@@ -413,7 +505,7 @@ void app_main() {
   // nvs_flash_init();
 
   framebuffer = heap_caps_malloc(ili9341->spi_max_transfer_size, MALLOC_CAP_SPIRAM);
-  set_overscan_border(0);
+  //set_overscan_border(0);
 
   SMS_init(&sms);
   available_ram("SMS_init");
@@ -428,8 +520,8 @@ void app_main() {
   SMS_set_apu_callback(&sms, core_apu_callback, AUDIO_FREQ);
 
   size_t screen_size = SMS_SCREEN_WIDTH * SMS_SCREEN_HEIGHT * 2;
-  backbuffer[0] = videobuffer_allocate(SMS_SCREEN_WIDTH, SMS_SCREEN_HEIGHT, screen_size / 6144);
-  backbuffer[1] = videobuffer_allocate(SMS_SCREEN_WIDTH, SMS_SCREEN_HEIGHT, screen_size / 6144);
+  backbuffer[0] = videobuffer_allocate(SMS_SCREEN_WIDTH, SMS_SCREEN_HEIGHT, screen_size / 4096);
+  //backbuffer[1] = videobuffer_allocate(SMS_SCREEN_WIDTH, SMS_SCREEN_HEIGHT, screen_size / 64);
   available_ram("backbuffer");
 
   SMS_set_pixels(&sms, backbuffer[0], SMS_SCREEN_WIDTH, 2);
@@ -447,7 +539,10 @@ void app_main() {
   gpio_set_level(GPIO_SD_PWR, 1);
   ws2812_init(GPIO_LED_DATA);
 
+  init_lcd();
+
   available_ram("done initializing");
 
+  //init_screen_rect();
   main_loop();
 }
