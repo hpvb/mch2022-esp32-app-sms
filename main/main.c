@@ -39,22 +39,24 @@ extern const uint8_t lcd_controller_end[] asm("_binary_lcd_controller_bin_end");
 
 static bool current_backbuffer = 0;
 videobuffer_t* backbuffer[2];
-static uint16_t *framebuffer = NULL;
+static uint8_t *framebuffer = NULL;
 
 static uint64_t frames = 0;
 static uint64_t cpu_cycles = 0;
 static uint64_t dropped_frames = 0;
 static uint64_t frame_time = 0;
+static uint64_t cpu_time = 0;
+static uint64_t vdp_time = 0;
 
 static xQueueHandle buttonQueue;
 static QueueHandle_t videoQueue;
+
 ILI9341 *ili9341 = NULL;
 ICE40 *ice40 = NULL;
 
 // Apparently we're not supposed to call these directly.
 esp_err_t ili9341_send(ILI9341 *device, const uint8_t *data, const int len, const bool dc_level);
 esp_err_t ili9341_set_addr_window(ILI9341 *device, uint16_t x, uint16_t y, uint16_t w, uint16_t h);
-void ili9341_set_lcd_mode(bool mode);
 
 struct SMS_Core sms;
 
@@ -62,34 +64,35 @@ static bool paused = false;
 
 static const uint8_t lcd_init_data[] = {
    0xf2,
-   3, 0xef, 0x03, 0x80, 0x02,             // ? (undocumented cmd)
-   3, 0xcf, 0x00, 0xc1, 0x30,             // Power control B
-   4, 0xed, 0x64, 0x03, 0x12, 0x81,       // Power on sequence control
-   3, 0xe8, 0x85, 0x00, 0x78,             // Driver timing control A
-   5, 0xcb, 0x39, 0x2c, 0x00, 0x34, 0x02, // Power control A
-   1, 0xf7, 0x20,                         // Pump ratio control
-   2, 0xea, 0x00, 0x00,                   // Driver timing control B
-   1, 0xc0, 0x23,                         // Power control 1
-   1, 0xc1, 0x10,                         // Power control 2
-   2, 0xc5, 0x3e, 0x28,                   // VCOM Control 1
-   1, 0xc7, 0x86,                         // VCOM Control 2
-   1, 0x3a, 0x55,                         // Pixel Format: 16b
-   3, 0xb6, 0x08, 0x82, 0x27,             // Display Function Control
-   1, 0xf2, 0x00,                         // 3 Gamma control disable
-   1, 0x26, 0x01,                         // Gamma Set
-  15, 0xe0, 0x0f, 0x31, 0x2b, 0x0c, 0x0e, // Positive Gamma Correction
-            0x08, 0x4e, 0xf1, 0x37, 0x07,
-            0x10, 0x03, 0x0e, 0x09, 0x00,
-  15, 0xe1, 0x00, 0x0e, 0x14, 0x03, 0x11, // Negative Gamma Correction
-            0x07, 0x31, 0xc1, 0x48, 0x08,
-            0x0f, 0x0c, 0x31, 0x36, 0x0f,
-   0, 0x11,                               // Sleep Out
-   0, 0x29,                               // Display ON
-   1, 0x35, 0x00,                         // Tearing Effect Line ON
-   1, 0x36, 0x28,                         // Memory Access Control
-   4, 0x2a, 0x00, 0x00, 0x01, 0x3f,       // Column Address Set
-   4, 0x2b, 0x00, 0x00, 0x00, 0xef,       // Page Address Set
-   0, 0x2c,
+   3, 0xef,              0x03, 0x80, 0x02,             // ? (undocumented cmd)
+   3, ILI9341_POWERB,    0x00, 0xc1, 0x30,             // Power control B
+   4, ILI9341_POWER_SEQ, 0x64, 0x03, 0x12, 0x81,       // Power on sequence control
+   3, ILI9341_DTCA,      0x85, 0x00, 0x78,             // Driver timing control A
+   5, ILI9341_POWERA,    0x39, 0x2c, 0x00, 0x34, 0x02, // Power control A
+   1, ILI9341_PRC,       0x20,                         // Pump ratio control
+   2, ILI9341_DTCB,      0x00, 0x00,                   // Driver timing control B
+   1, ILI9341_LCMCTRL,   0x23,                         // Power control 1
+   1, ILI9341_POWER2,    0x10,                         // Power control 2
+   2, ILI9341_VCOM1,     0x3e, 0x28,                   // VCOM Control 1
+   1, ILI9341_VCOM2,     0x86,                         // VCOM Control 2
+   1, ILI9341_COLMOD,    0x55,                         // Pixel Format: 16b
+   3, ILI9341_DFC,       0x08, 0x82, 0x27,             // Display Function Control
+   1, ILI9341_3GAMMA_EN, 0x00,                         // 3 Gamma control disable
+   1, ILI9341_GAMSET,    0x01,                         // Gamma Set
+  15, ILI9341_PVGAMCTRL, 0x0f, 0x31, 0x2b, 0x0c, 0x0e, // Positive Gamma Correction
+                         0x08, 0x4e, 0xf1, 0x37, 0x07,
+                         0x10, 0x03, 0x0e, 0x09, 0x00,
+  15, ILI9341_NVGAMCTRL, 0x00, 0x0e, 0x14, 0x03, 0x11, // Negative Gamma Correction
+                         0x07, 0x31, 0xc1, 0x48, 0x08,
+                         0x0f, 0x0c, 0x31, 0x36, 0x0f,
+   0, ILI9341_SLPOUT,                                  // Sleep Out
+   0, ILI9341_DISPON,                                  // Display ON
+   1, ILI9341_TEON,      0x00,                         // Tearing Effect Line ON
+   1, ILI9341_MADCTL,    0x28,                         // Memory Access Control
+   4, ILI9341_CASET,     0x00, 0x00, 0x01, 0x3f,       // Column Address Set
+   4, ILI9341_RASET,     0x00, 0x00, 0x00, 0xef,       // Page Address Set
+   1, ILI9341_FRMCTR1,   0x10,                         // 63 Hz refresh rate
+   0, ILI9341_RAMWR,
 };
 
 void lcd_send_command(uint8_t cmd, const uint8_t* data, uint8_t size) {
@@ -112,6 +115,29 @@ void lcd_send_command(uint8_t cmd, const uint8_t* data, uint8_t size) {
   ice40_send(ice40, packet, size + 3);
 }
 
+void lcd_set_addr_window(uint16_t x, uint16_t y, uint16_t w, uint16_t h) {
+    uint32_t xa = ((uint32_t)x << 16) | (x+w-1);
+    uint32_t ya = ((uint32_t)y << 16) | (y+h-1);
+
+    uint8_t packet[] = {
+      0xf2,
+      0x04, ILI9341_CASET, (xa>>24)&0xFF, (xa>>16)&0xFF, (xa>> 8)&0xFF, xa &0xFF,
+      0x04, ILI9341_RASET, (ya>>24)&0xFF, (ya>>16)&0xFF, (ya>> 8)&0xFF, ya &0xFF,
+      0x00, ILI9341_RAMWR };
+
+    ice40_send(ice40, packet, sizeof(packet));
+}
+
+__attribute__((always_inline)) inline void lcd_send_turbo(const uint8_t* data, uint32_t length) {
+    spi_transaction_t transaction = {
+        .user = (void*) ice40,
+        .length = length * 8,
+        .tx_buffer = data,
+        .rx_buffer = NULL
+    };
+    spi_device_transmit(ice40->_spi_device_turbo, &transaction);
+}
+
 void init_lcd() {
   printf("Loading ICE40 bitstream from %p, size %i\n", lcd_controller_start, lcd_controller_end - lcd_controller_start);
   ice40_load_bitstream(ice40, lcd_controller_start, lcd_controller_end - lcd_controller_start);
@@ -119,7 +145,6 @@ void init_lcd() {
 
   printf("Switching LCD to ICE40\n");
   ili9341_deinit(ili9341);
-  //ili9341_set_lcd_mode(true);
   printf("Done LCD to ICE40\n");
 
   printf("Sending LCD init data\n");
@@ -140,7 +165,7 @@ __attribute__((always_inline)) inline uint32_t core_colour_callback(void *user, 
 
 void init_screen_rect() {
   // We set this only once, saves us some more SPI bandwidth
-  ili9341_set_addr_window(ili9341, (ILI9341_WIDTH - SMS_SCREEN_WIDTH) / 2,
+  lcd_set_addr_window((ILI9341_WIDTH - SMS_SCREEN_WIDTH) / 2,
                           (ILI9341_HEIGHT - SMS_SCREEN_HEIGHT) / 2,
                           SMS_SCREEN_WIDTH, SMS_SCREEN_HEIGHT);
 
@@ -178,7 +203,7 @@ __attribute__((always_inline)) inline static void write_frame(bool frame) {
     //    (((uint8_t*)backbuffer[frame]->parts[i]) - 1)[2],
     //    (((uint8_t*)backbuffer[frame]->parts[i]) - 1)[3]);
 
-    ice40_send_turbo(ice40, ((uint8_t*)backbuffer[frame]->parts[i]) - 1, backbuffer[frame]->part_size + 1);
+    lcd_send_turbo(((uint8_t*)backbuffer[frame]->parts[i]) - 1, backbuffer[frame]->part_size + 1);
   }
 
   currently_drawing = false;
@@ -196,7 +221,7 @@ __attribute__((always_inline)) inline void core_vblank_callback(void *user) {
     ++dropped_frames;
   }
 
-  //current_backbuffer = !current_backbuffer;
+  current_backbuffer = !current_backbuffer;
   sms.pixels = backbuffer[current_backbuffer];
 }
 
@@ -225,25 +250,25 @@ static void handle_input() {
       bool value = buttonMessage.state;
       switch (button) {
       case RP2040_INPUT_JOYSTICK_DOWN:
-        SMS_set_port_a(&sms, JOY1_DOWN_BUTTON, value);
+        SMS_set_port_a(JOY1_DOWN_BUTTON, value);
         break;
       case RP2040_INPUT_JOYSTICK_UP:
-        SMS_set_port_a(&sms, JOY1_UP_BUTTON, value);
+        SMS_set_port_a(JOY1_UP_BUTTON, value);
         break;
       case RP2040_INPUT_JOYSTICK_LEFT:
-        SMS_set_port_a(&sms, JOY1_LEFT_BUTTON, value);
+        SMS_set_port_a(JOY1_LEFT_BUTTON, value);
         break;
       case RP2040_INPUT_JOYSTICK_RIGHT:
-        SMS_set_port_a(&sms, JOY1_RIGHT_BUTTON, value);
+        SMS_set_port_a(JOY1_RIGHT_BUTTON, value);
         break;
       case RP2040_INPUT_BUTTON_ACCEPT:
-        SMS_set_port_a(&sms, JOY1_A_BUTTON, value);
+        SMS_set_port_a(JOY1_A_BUTTON, value);
         break;
       case RP2040_INPUT_BUTTON_BACK:
-        SMS_set_port_a(&sms, JOY1_B_BUTTON, value);
+        SMS_set_port_a(JOY1_B_BUTTON, value);
         break;
       case RP2040_INPUT_BUTTON_START:
-        SMS_set_port_a(&sms, PAUSE_BUTTON, value);
+        SMS_set_port_a(PAUSE_BUTTON, value);
         break;
       case RP2040_INPUT_BUTTON_SELECT:
 	if (! select_down) {
@@ -346,36 +371,38 @@ static void sonic2_leds() {
 
 #define MIN(x, y) (((x) < (y)) ? (x) : (y))
 __attribute__((always_inline)) inline void write_screen(uint8_t* buffer, size_t size) {
-  for(int i = 0; i < size / ili9341->spi_max_transfer_size + 1; ++i) {
-    size_t length = MIN(ili9341->spi_max_transfer_size, size - (i * ili9341->spi_max_transfer_size));
-    if (length) ili9341_send(ili9341, buffer, length, true);
+  for(int i = 0; i < (size / 4096) + 1; ++i) {
+    size_t length = MIN(4096, size - (i * 4096));
+    if (length) lcd_send_turbo(buffer, length + 1);
   }
 }
 
 void set_overscan_border(uint16_t color) {
   while (currently_drawing) {}
 
-  for (uint32_t i = 0; i < ili9341->spi_max_transfer_size / 2; ++i) {
-    framebuffer[i] = color;
+  framebuffer[0] = 0xf3;
+  for (uint32_t i = 1; i < 4097; i += 2) {
+    *(framebuffer + i) = color;
+    *(framebuffer + i + 1) = color >> 8;
   }
 
   // This is not a mistake, we're in 16bpp
   size_t top = ILI9341_WIDTH * (ILI9341_HEIGHT - SMS_SCREEN_HEIGHT);
   size_t side = (ILI9341_WIDTH - SMS_SCREEN_WIDTH) * SMS_SCREEN_HEIGHT; 
 
-  ili9341_set_addr_window(ili9341, 0, 0, ILI9341_WIDTH, (ILI9341_HEIGHT - SMS_SCREEN_HEIGHT) / 2);
-  write_screen((uint8_t*)framebuffer, top);
-  ili9341_set_addr_window(ili9341, 0, (ILI9341_HEIGHT - (ILI9341_HEIGHT - SMS_SCREEN_HEIGHT) / 2), ILI9341_WIDTH, (ILI9341_HEIGHT - SMS_SCREEN_HEIGHT) / 2);
-  write_screen((uint8_t*)framebuffer, top);
-  ili9341_set_addr_window(ili9341, 0, (ILI9341_HEIGHT - SMS_SCREEN_HEIGHT) / 2, (ILI9341_WIDTH - SMS_SCREEN_WIDTH) / 2, ILI9341_HEIGHT - (ILI9341_HEIGHT - SMS_SCREEN_HEIGHT));
-  write_screen((uint8_t*)framebuffer, side);
-  ili9341_set_addr_window(
-    ili9341, ILI9341_WIDTH - ((ILI9341_WIDTH - SMS_SCREEN_WIDTH) / 2),
+  lcd_set_addr_window(0, 0, ILI9341_WIDTH, (ILI9341_HEIGHT - SMS_SCREEN_HEIGHT) / 2);
+  write_screen(framebuffer, top);
+  lcd_set_addr_window(0, (ILI9341_HEIGHT - (ILI9341_HEIGHT - SMS_SCREEN_HEIGHT) / 2), ILI9341_WIDTH, (ILI9341_HEIGHT - SMS_SCREEN_HEIGHT) / 2);
+  write_screen(framebuffer, top);
+  lcd_set_addr_window(0, (ILI9341_HEIGHT - SMS_SCREEN_HEIGHT) / 2, (ILI9341_WIDTH - SMS_SCREEN_WIDTH) / 2, ILI9341_HEIGHT - (ILI9341_HEIGHT - SMS_SCREEN_HEIGHT));
+  write_screen(framebuffer, side);
+  lcd_set_addr_window(
+    ILI9341_WIDTH - ((ILI9341_WIDTH - SMS_SCREEN_WIDTH) / 2),
     (ILI9341_HEIGHT - SMS_SCREEN_HEIGHT) / 2,
     (ILI9341_WIDTH - SMS_SCREEN_WIDTH) / 2,
     ILI9341_HEIGHT - (ILI9341_HEIGHT - SMS_SCREEN_HEIGHT)
   );
-  write_screen((uint8_t*)framebuffer, side);
+  write_screen(framebuffer, side);
 
   init_screen_rect();
 }
@@ -405,19 +432,27 @@ void main_loop() {
     }
 
     for (size_t i = 0; i < SMS_CPU_CLOCK / 60; i += sms.cpu.cycles) {
+      //uint64_t cpu_start = esp_timer_get_time();
       z80_run();
+      //uint64_t cpu_end = esp_timer_get_time();
+      //cpu_time += cpu_end - cpu_start;
+
+      //uint64_t vdp_start = esp_timer_get_time();
       vdp_run(sms.cpu.cycles);
-      //psg_run(sms.cpu.cycles);
+      //uint64_t vdp_end = esp_timer_get_time();
+      //vdp_time += vdp_end - vdp_start;
+
+      psg_run(sms.cpu.cycles);
       cpu_cycles += sms.cpu.cycles;
 
       if (paused) break;
     }
     
-    //psg_sync();
+    psg_sync();
 
     current_overscan_color = sms.vdp.colour[16 + (sms.vdp.registers[0x7] & 0xF)];
     if (overscan_color != current_overscan_color) {
-      //set_overscan_border(current_overscan_color);
+      set_overscan_border(current_overscan_color);
       overscan_color = current_overscan_color;
     }
 
@@ -432,20 +467,20 @@ void main_loop() {
 
     end = esp_timer_get_time();
     if ((end - start) >= 1000000) {
-      printf("cpu_mhz: %.6f, fps: %lli, dropped: %lli, avg_frametime: %lli\n",
-        cpu_cycles / 1000000.00, frames, dropped_frames, frame_time / frames);
+      printf("cpu_mhz: %.6f, fps: %lli, dropped: %lli, avg_frametime: %lli, cputime: %lli, vdptime: %lli, total: %lli\n",
+        cpu_cycles / 1000000.00, frames, dropped_frames, frame_time / frames, cpu_time / frames , vdp_time / frames, (cpu_time + vdp_time) / frames);
 
-#if 0
       if (cpu_cycles < 3579545)
         set_overscan_border(0x00f0);
       else
         set_overscan_border(current_overscan_color);
-#endif
 
       frames = 0;
       cpu_cycles = 0;
       dropped_frames = 0;
       frame_time = 0;
+      cpu_time = 0;
+      vdp_time = 0;
       start = esp_timer_get_time();
     }
   }
@@ -504,10 +539,7 @@ void app_main() {
   buttonQueue = get_rp2040()->queue;
   // nvs_flash_init();
 
-  framebuffer = heap_caps_malloc(ili9341->spi_max_transfer_size, MALLOC_CAP_SPIRAM);
-  //set_overscan_border(0);
-
-  SMS_init(&sms);
+  SMS_init();
   available_ram("SMS_init");
 
   printf("Starting video thread\n");
@@ -515,16 +547,16 @@ void app_main() {
   xTaskCreatePinnedToCore(&videoTask, "videoTask", 2048, NULL, 5, NULL, 0);
   available_ram("videoTask");
 
-  SMS_set_colour_callback(&sms, core_colour_callback);
-  SMS_set_vblank_callback(&sms, core_vblank_callback);
-  SMS_set_apu_callback(&sms, core_apu_callback, AUDIO_FREQ);
+  SMS_set_colour_callback(core_colour_callback);
+  SMS_set_vblank_callback(core_vblank_callback);
+  SMS_set_apu_callback(core_apu_callback, AUDIO_FREQ);
 
   size_t screen_size = SMS_SCREEN_WIDTH * SMS_SCREEN_HEIGHT * 2;
   backbuffer[0] = videobuffer_allocate(SMS_SCREEN_WIDTH, SMS_SCREEN_HEIGHT, screen_size / 4096);
-  //backbuffer[1] = videobuffer_allocate(SMS_SCREEN_WIDTH, SMS_SCREEN_HEIGHT, screen_size / 64);
+  backbuffer[1] = videobuffer_allocate(SMS_SCREEN_WIDTH, SMS_SCREEN_HEIGHT, screen_size / 4096);
   available_ram("backbuffer");
 
-  SMS_set_pixels(&sms, backbuffer[0], SMS_SCREEN_WIDTH, 2);
+  SMS_set_pixels(backbuffer[0], SMS_SCREEN_WIDTH, 2);
 
   size_t rom_size = rom_end - rom_start;
   uint8_t* rom = heap_caps_malloc(rom_size, MALLOC_CAP_SPIRAM);
@@ -532,7 +564,7 @@ void app_main() {
     printf("Allocation of rom in SPIRAM failed. Attempted to allocate %i bytes\n", rom_size);
   }
   memcpy(rom, rom_start, rom_size);
-  SMS_loadrom(&sms, rom, rom_size, SMS_System_SMS);
+  SMS_loadrom(rom, rom_size, SMS_System_SMS);
   printf("ROM loaded, crc: 0x%08X\n", sms.crc);
 
   gpio_set_direction(GPIO_SD_PWR, GPIO_MODE_OUTPUT);
@@ -541,8 +573,12 @@ void app_main() {
 
   init_lcd();
 
+  framebuffer = heap_caps_malloc(4097, MALLOC_CAP_SPIRAM);
+  set_overscan_border(0);
+
+  init_screen_rect();
+
   available_ram("done initializing");
 
-  //init_screen_rect();
   main_loop();
 }

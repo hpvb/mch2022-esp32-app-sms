@@ -136,10 +136,10 @@ SMS_FORCE_INLINE bool vdp_has_interrupt();
 SMS_FORCE_INLINE void vdp_run(uint8_t cycles);
 
 // [MISC]
-SMS_STATIC bool SMS_has_bios(const struct SMS_Core* sms);
+SMS_STATIC bool SMS_has_bios();
 SMS_FORCE_INLINE bool SMS_parity16(uint16_t value);
 SMS_FORCE_INLINE bool SMS_parity8(uint8_t value);
-SMS_STATIC bool SMS_is_spiderman_int_hack_enabled(const struct SMS_Core* sms);
+SMS_STATIC bool SMS_is_spiderman_int_hack_enabled();
 SMS_STATIC void vdp_mark_palette_dirty();
 
 #ifdef __cplusplus

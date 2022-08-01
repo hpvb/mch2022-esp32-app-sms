@@ -17,7 +17,7 @@ videobuffer_t* videobuffer_allocate(uint16_t width, uint16_t height, short part_
 		buffer->real_parts[i] = calloc(buffer->part_size + 1, 1);
 		if (!buffer->real_parts[i])
 			printf("Failed to allocate buffer part %i!\n", i);
-		buffer->real_parts[i][0] = 0xf2;
+		buffer->real_parts[i][0] = 0xf3;
 		buffer->parts[i] = buffer->real_parts[i] + 1;
 	}
 
