@@ -17,6 +17,7 @@ clean:
 
 build:
 	rm -f build/rom.sms.S
+	rm -f build/lcd_controller.*.S
 	source "$(IDF_PATH)/export.sh" && idf.py build
 
 install: build

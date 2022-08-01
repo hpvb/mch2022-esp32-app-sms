@@ -6,4 +6,5 @@
 #include "vdp.c"
 
 #include "main.c"
+#include "ice40-lcd.c"
 #include "videobuffer.c"

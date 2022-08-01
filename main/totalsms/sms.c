@@ -8,6 +8,8 @@
 #include <stdint.h>
 #include <string.h>
 
+extern struct SMS_Core sms;
+
 #include "esp_heap_caps.h"
 
 // not all values are listed here because the other
@@ -103,39 +105,39 @@ uint32_t SMS_crc32(uint32_t crc, const void* data, size_t size)
     return crc;
 }
 
-void SMS_skip_frame(struct SMS_Core* sms, bool enable)
+__attribute__((always_inline)) inline void SMS_skip_frame(bool enable)
 {
-    sms->skip_frame = enable;
+    sms.skip_frame = enable;
 }
 
-void SMS_set_system_type(struct SMS_Core* sms, enum SMS_System system)
+__attribute__((always_inline)) inline void SMS_set_system_type(enum SMS_System system)
 {
-    sms->system = system;
+    sms.system = system;
 }
 
-enum SMS_System SMS_get_system_type(const struct SMS_Core* sms)
+__attribute__((always_inline)) inline enum SMS_System SMS_get_system_type()
 {
-    return sms->system;
+    return sms.system;
 }
 
-bool SMS_is_system_type_sms(const struct SMS_Core* sms)
+__attribute__((always_inline)) inline bool SMS_is_system_type_sms()
 {
-    return SMS_get_system_type(sms) == SMS_System_SMS;
+    return SMS_get_system_type() == SMS_System_SMS;
 }
 
-bool SMS_is_system_type_gg(const struct SMS_Core* sms)
+__attribute__((always_inline)) inline bool SMS_is_system_type_gg()
 {
-    return SMS_get_system_type(sms) == SMS_System_GG;
+    return SMS_get_system_type() == SMS_System_GG;
 }
 
-bool SMS_is_system_type_sg(const struct SMS_Core* sms)
+__attribute__((always_inline)) inline bool SMS_is_system_type_sg()
 {
-    return SMS_get_system_type(sms) == SMS_System_SG1000;
+    return SMS_get_system_type() == SMS_System_SG1000;
 }
 
-bool SMS_is_spiderman_int_hack_enabled(const struct SMS_Core* sms)
+__attribute__((always_inline)) inline bool SMS_is_spiderman_int_hack_enabled()
 {
-    return sms->crc == 0xEBE45388;
+    return sms.crc == 0xEBE45388;
 }
 
 struct SMS_RomHeader SMS_parse_rom_header(const uint8_t* data, uint16_t offset)
@@ -173,153 +175,143 @@ static void log_header(const struct SMS_RomHeader* header)
     // silence warnings if logging is disabled
     UNUSED(header); UNUSED(region_code_string); UNUSED(valid_rom_size_string);
 
-    SMS_log("version: [0x%X]\n", header->version);
-    SMS_log("region_code: [0x%X] [%s]\n", header->region_code, region_code_string[header->region_code]);
-    SMS_log("rom_size: [0x%X] [%s]\n", header->rom_size, valid_rom_size_string[header->rom_size]);
+    SMS_log("version: [0x%X]", header->version);
+    SMS_log("region_code: [0x%X] [%s]", header->region_code, region_code_string[header->region_code]);
+    SMS_log("rom_size: [0x%X] [%s]", header->rom_size, valid_rom_size_string[header->rom_size]);
 }
 
-bool SMS_init(struct SMS_Core* sms)
+bool SMS_init()
 {
-    if (!sms)
-    {
-        return false;
-    }
-
-    memset(sms, 0, sizeof(struct SMS_Core));
-    sms->cart.ram[0] = heap_caps_calloc(1024 * 16, 1, MALLOC_CAP_SPIRAM);
-    sms->cart.ram[1] = heap_caps_calloc(1024 * 16, 1, MALLOC_CAP_SPIRAM);
+    memset(&sms, 0, sizeof(struct SMS_Core));
+    sms.cart.ram[0] = heap_caps_calloc(1024 * 16, 1, MALLOC_CAP_SPIRAM);
+    sms.cart.ram[1] = heap_caps_calloc(1024 * 16, 1, MALLOC_CAP_SPIRAM);
 
     return true;
 }
 
-static void SMS_reset(struct SMS_Core* sms)
+static void SMS_reset()
 {
     // do NOT reset cart!
-    memset(sms->rmap, 0, sizeof(sms->rmap));
-    memset(sms->wmap, 0, sizeof(sms->wmap));
-    memset(&sms->cpu, 0, sizeof(sms->cpu));
-    memset(&sms->vdp, 0, sizeof(sms->vdp));
-    memset(&sms->psg, 0, sizeof(sms->psg));
-    memset(&sms->port, 0, sizeof(sms->port));
-    memset(sms->system_ram, 0, sizeof(sms->system_ram));
+    memset(sms.rmap, 0, sizeof(sms.rmap));
+    memset(sms.wmap, 0, sizeof(sms.wmap));
+    memset(&sms.cpu, 0, sizeof(sms.cpu));
+    memset(&sms.vdp, 0, sizeof(sms.vdp));
+    memset(&sms.psg, 0, sizeof(sms.psg));
+    memset(&sms.port, 0, sizeof(sms.port));
+    memset(sms.system_ram, 0, sizeof(sms.system_ram));
 
-    z80_init(sms);
-    psg_init(sms);
-    vdp_init(sms);
+    z80_init();
+    psg_init();
+    vdp_init();
 
     // enable everything in control
-    memset(&sms->memory_control, 0, sizeof(sms->memory_control));
+    memset(&sms.memory_control, 0, sizeof(sms.memory_control));
     // not sure if this needs to be reset...
-    memset(&sms->system_ram, 0xFF, sizeof(sms->system_ram));
+    memset(sms.system_ram, 0xFF, sizeof(sms.system_ram));
 
     // if we don't have bios, disable it in control
-    if (!SMS_has_bios(sms))
+    if (!SMS_has_bios())
     {
-        sms->memory_control.bios_rom_disable = true;
+        sms.memory_control.bios_rom_disable = true;
     }
 
     // port A/B are hi when a button is NOT pressed
-    sms->port.a = 0xFF;
-    sms->port.b = 0xFF;
+    sms.port.a = 0xFF;
+    sms.port.b = 0xFF;
 
-    if (SMS_is_system_type_gg(sms))
+    if (SMS_is_system_type_gg())
     {
-        sms->port.gg_regs[0x0] = 0xC0;
-        sms->port.gg_regs[0x1] = 0x7F;
-        sms->port.gg_regs[0x2] = 0xFF;
-        sms->port.gg_regs[0x3] = 0x00;
-        sms->port.gg_regs[0x4] = 0xFF;
-        sms->port.gg_regs[0x5] = 0x00;
-        sms->port.gg_regs[0x6] = 0xFF;
+        sms.port.gg_regs[0x0] = 0xC0;
+        sms.port.gg_regs[0x1] = 0x7F;
+        sms.port.gg_regs[0x2] = 0xFF;
+        sms.port.gg_regs[0x3] = 0x00;
+        sms.port.gg_regs[0x4] = 0xFF;
+        sms.port.gg_regs[0x5] = 0x00;
+        sms.port.gg_regs[0x6] = 0xFF;
     }
 }
 
-bool SMS_has_bios(const struct SMS_Core* sms)
+bool SMS_has_bios()
 {
     // bios should be at least 1-page size in size
-    return sms->bios && sms->bios_size >= 1024 && sms->bios_size <= 1024*32;
+    return sms.bios && sms.bios_size >= 1024 && sms.bios_size <= 1024*32;
 }
 
-bool SMS_loadbios(struct SMS_Core* sms, const uint8_t* bios, size_t size)
+bool SMS_loadbios(const uint8_t* bios, size_t size)
 {
-    sms->bios = bios;
-    sms->bios_size = size;
+    sms.bios = bios;
+    sms.bios_size = size;
 
     // todo: hash all known bios to know exactly what bios is being loaded
-    return SMS_has_bios(sms);
+    return SMS_has_bios();
 }
 
-static bool sg_loadrom(struct SMS_Core* sms, const uint8_t* rom, size_t size, int system_hint)
+static bool sg_loadrom(const uint8_t* rom, size_t size, int system_hint)
 {
     assert(system_hint == SMS_System_SG1000);
 
-    SMS_log("[INFO] trying to load sg rom\n");
+    SMS_log("[INFO] trying to load sg rom");
 
     // save the rom, setup the size and mask
-    sms->rom = rom;
-    sms->rom_size = size;
-    sms->rom_mask = size / 0x400; // this works because size is always pow2
-    sms->cart.max_bank_mask = (size / 0x4000) - 1;
-    sms->crc = SMS_crc32(0, rom, size);
+    sms.rom = rom;
+    sms.rom_size = size;
+    sms.rom_mask = size / 0x400; // this works because size is always pow2
+    sms.cart.max_bank_mask = (size / 0x4000) - 1;
+    sms.crc = SMS_crc32(0, rom, size);
 
-    SMS_log("crc32 0x%08X\n", sms->crc);
+    SMS_log("crc32 0x%08X", sms.crc);
 
-    SMS_set_system_type(sms, system_hint);
-    sms->cart.mapper_type = MAPPER_TYPE_NONE;
-    SMS_reset(sms);
+    SMS_set_system_type(system_hint);
+    sms.cart.mapper_type = MAPPER_TYPE_NONE;
+    SMS_reset();
 
     // this assumes the game is always sega mapper
     // which (for testing at least), it always will be
-    mapper_init(sms);
+    mapper_init();
 
     return true;
 }
 
-static bool loadrom2(struct SMS_Core* sms, struct RomEntry* entry, const uint8_t* rom, size_t size)
+static bool loadrom2(struct RomEntry* entry, const uint8_t* rom, size_t size)
 {
     // save the rom, setup the size and mask
-    sms->rom = rom;
-    sms->rom_size = size;
-    sms->rom_mask = size / 0x400; // this works because size is always pow2
-    sms->cart.max_bank_mask = (size / 0x4000) - 1;
-    sms->crc = entry->crc;
+    sms.rom = rom;
+    sms.rom_size = size;
+    sms.rom_mask = size / 0x400; // this works because size is always pow2
+    sms.cart.max_bank_mask = (size / 0x4000) - 1;
+    sms.crc = entry->crc;
 
-    SMS_set_system_type(sms, entry->sys);
-    SMS_reset(sms);
+    SMS_set_system_type(entry->sys);
+    SMS_reset();
 
     // this assumes the game is always sega mapper
     // which (for testing at least), it always will be
-    sms->cart.mapper_type = entry->map;
-    mapper_init(sms);
+    sms.cart.mapper_type = entry->map;
+    mapper_init();
 
     return true;
 }
 
-bool SMS_loadrom(struct SMS_Core* sms, const uint8_t* rom, size_t size, int system_hint)
+bool SMS_loadrom(const uint8_t* rom, size_t size, int system_hint)
 {
-    assert(sms);
-    assert(rom);
-    assert(size);
-    assert(sms && rom && size);
-
-    SMS_log("[INFO] loadrom called with rom size: 0x%zX\n", size);
+    SMS_log("[INFO] loadrom called with rom size: 0x%zX", size);
 
     struct RomEntry entry = {0};
     const uint32_t crc = SMS_crc32(0, rom, size);
-    SMS_log("crc32 0x%08X\n", crc);
+    SMS_log("crc32 0x%08X", crc);
 
     if (rom_database_find_entry(&entry, crc))
     {
-        return loadrom2(sms, &entry, rom, size);
+        return loadrom2(&entry, rom, size);
     }
     else
     {
-        SMS_log("couldn't find rom in database, checking system hint\n");
+        SMS_log("couldn't find rom in database, checking system hint");
 
         if (system_hint == SMS_System_SG1000)
         {
-            SMS_log("system hint is SG1000, trying to load...\n");
-            return sg_loadrom(sms, rom, size, system_hint);
+            SMS_log("system hint is SG1000, trying to load...");
+            return sg_loadrom(rom, size, system_hint);
         }
         else
         {
@@ -333,11 +325,11 @@ bool SMS_loadrom(struct SMS_Core* sms, const uint8_t* rom, size_t size, int syst
     // no header found!
     if (header_offset == 0)
     {
-        SMS_log_fatal("[ERROR] unable to find rom header!\n");
+        SMS_log_fatal("[ERROR] unable to find rom header!");
         return false;
     }
 
-    SMS_log("[INFO] found header offset at: 0x%X\n", header_offset);
+    SMS_log("[INFO] found header offset at: 0x%X", header_offset);
 
     struct SMS_RomHeader header = SMS_parse_rom_header(rom, header_offset);
     log_header(&header);
@@ -345,150 +337,150 @@ bool SMS_loadrom(struct SMS_Core* sms, const uint8_t* rom, size_t size, int syst
     // check if the size is valid
     if (!valid_rom_size_values[header.rom_size])
     {
-        SMS_log_fatal("[ERROR] invalid rom size in header! 0x%X\n", header.rom_size);
+        SMS_log_fatal("[ERROR] invalid rom size in header! 0x%X", header.rom_size);
         return false;
     }
 
     // save the rom, setup the size and mask
-    sms->rom = rom;
-    sms->rom_size = size;
-    sms->rom_mask = size / 0x400; // this works because size is always pow2
-    sms->cart.max_bank_mask = (size / 0x4000) - 1;
-    sms->crc = crc;
+    sms.rom = rom;
+    sms.rom_size = size;
+    sms.rom_mask = size / 0x400; // this works because size is always pow2
+    sms.cart.max_bank_mask = (size / 0x4000) - 1;
+    sms.crc = crc;
 
-    SMS_log("crc32 0x%08X\n", sms->crc);
+    SMS_log("crc32 0x%08X", sms.crc);
 
     if (system_hint != -1)
     {
-        SMS_set_system_type(sms, system_hint);
+        SMS_set_system_type(system_hint);
     }
     else if (header.region_code == 0x5 || header.region_code == 0x6 || header.region_code == 0x7)
     {
-        SMS_set_system_type(sms, SMS_System_GG);
+        SMS_set_system_type(SMS_System_GG);
     }
     else
     {
-        SMS_set_system_type(sms, SMS_System_SMS);
+        SMS_set_system_type(SMS_System_SMS);
     }
 
-    SMS_reset(sms);
+    SMS_reset();
 
     // this assumes the game is always sega mapper
     // which (for testing at least), it always will be
-    sms->cart.mapper_type = MAPPER_TYPE_SEGA;
-    mapper_init(sms);
+    sms.cart.mapper_type = MAPPER_TYPE_SEGA;
+    mapper_init();
 
     return true;
 }
 
-bool SMS_loadsave(struct SMS_Core* sms, const uint8_t* data, size_t size)
+bool SMS_loadsave(const uint8_t* data, size_t size)
 {
-    if (!data || !size || size != sizeof(sms->cart.ram))
+    if (!data || !size || size != sizeof(sms.cart.ram))
     {
         return false;
     }
 
-    memcpy(sms->cart.ram, data, size);
+    memcpy(&sms.cart.ram, data, size);
     return true;
 }
 
-bool SMS_used_sram(const struct SMS_Core* sms)
+bool SMS_used_sram()
 {
-    return sms->cart.sram_used;
+    return sms.cart.sram_used;
 }
 
-void SMS_set_pixels(struct SMS_Core* sms, videobuffer_t* pixels, uint16_t pitch, uint8_t bpp)
+void SMS_set_pixels(videobuffer_t* pixels, uint16_t pitch, uint8_t bpp)
 {
-    sms->pixels = pixels;
-    sms->pitch = pitch;
-    sms->bpp = bpp;
+    sms.pixels = pixels;
+    sms.pitch = pitch;
+    sms.bpp = bpp;
 }
 
-void SMS_set_userdata(struct SMS_Core* sms, void* userdata)
+void SMS_set_userdata(void* userdata)
 {
-    sms->userdata = userdata;
+    sms.userdata = userdata;
 }
 
-void SMS_set_apu_callback(struct SMS_Core* sms, sms_apu_callback_t cb, uint32_t freq)
+void SMS_set_apu_callback(sms_apu_callback_t cb, uint32_t freq)
 {
     // avoid div by 0
     if (cb && freq)
     {
-        sms->apu_callback = cb;
-        sms->apu_callback_freq = (SMS_CPU_CLOCK / freq);
+        sms.apu_callback = cb;
+        sms.apu_callback_freq = (SMS_CPU_CLOCK / freq);
     }
     else
     {
-        sms->apu_callback = NULL;
-        sms->apu_callback_freq = 0;
+        sms.apu_callback = NULL;
+        sms.apu_callback_freq = 0;
     }
 }
 
-void SMS_set_vblank_callback(struct SMS_Core* sms, sms_vblank_callback_t cb)
+void SMS_set_vblank_callback(sms_vblank_callback_t cb)
 {
-    sms->vblank_callback = cb;
+    sms.vblank_callback = cb;
 }
 
-void SMS_set_colour_callback(struct SMS_Core* sms, sms_colour_callback_t cb)
+void SMS_set_colour_callback(sms_colour_callback_t cb)
 {
-    sms->colour_callback = cb;
+    sms.colour_callback = cb;
 }
 
-void SMS_set_better_drums(struct SMS_Core* sms, bool enable)
+void SMS_set_better_drums(bool enable)
 {
-    sms->better_drums = enable;
+    sms.better_drums = enable;
 }
 
 enum { STATE_MAGIC = 0x5E6A };
 enum { STATE_VERSION = 2 };
 
 // for savestates, we don't save the port
-bool SMS_savestate(const struct SMS_Core* sms, struct SMS_State* state)
+bool SMS_savestate(struct SMS_State* state)
 {
     state->header.magic = STATE_MAGIC;
     state->header.version = STATE_VERSION;
-    state->header.crc = sms->crc;
+    state->header.crc = sms.crc;
 
-    memcpy(&state->cpu, &sms->cpu, sizeof(sms->cpu));
-    memcpy(&state->vdp, &sms->vdp, sizeof(sms->vdp));
-    memcpy(&state->psg, &sms->psg, sizeof(sms->psg));
-    memcpy(&state->cart, &sms->cart, sizeof(sms->cart));
-    memcpy(&state->memory_control, &sms->memory_control, sizeof(sms->memory_control));
-    memcpy(state->system_ram, sms->system_ram, sizeof(sms->system_ram));
+    memcpy(&state->cpu, &sms.cpu, sizeof(sms.cpu));
+    memcpy(&state->vdp, &sms.vdp, sizeof(sms.vdp));
+    memcpy(&state->psg, &sms.psg, sizeof(sms.psg));
+    memcpy(&state->cart, &sms.cart, sizeof(sms.cart));
+    memcpy(&state->memory_control, &sms.memory_control, sizeof(sms.memory_control));
+    memcpy(state->system_ram, &sms.system_ram, sizeof(sms.system_ram));
 
     return true;
 }
 
-bool SMS_loadstate(struct SMS_Core* sms, const struct SMS_State* state)
+bool SMS_loadstate(const struct SMS_State* state)
 {
     if (state->header.magic != STATE_MAGIC)
     {
-        SMS_log("bad savestate, invalid magic. got: 0x%04X wanted: 0x%04X\n", state->header.magic, STATE_MAGIC);
+        SMS_log("bad savestate, invalid magic. got: 0x%04X wanted: 0x%04X", state->header.magic, STATE_MAGIC);
         return false;
     }
 
     if (state->header.version != STATE_VERSION)
     {
-        SMS_log("bad savestate, invalid version. got: 0x%04X wanted: 0x%04X\n", state->header.version, STATE_VERSION);
+        SMS_log("bad savestate, invalid version. got: 0x%04X wanted: 0x%04X", state->header.version, STATE_VERSION);
         return false;
     }
 
-    if (state->header.crc != sms->crc)
+    if (state->header.crc != sms.crc)
     {
-        SMS_log("bad savestate, invalid crc. got: 0x%04X wanted: 0x%04X\n", state->header.crc, sms->crc);
+        SMS_log("bad savestate, invalid crc. got: 0x%04X wanted: 0x%04X", state->header.crc, sms.crc);
         return false;
     }
 
-    memcpy(&sms->cpu, &state->cpu, sizeof(sms->cpu));
-    memcpy(&sms->vdp, &state->vdp, sizeof(sms->vdp));
-    memcpy(&sms->psg, &state->psg, sizeof(sms->psg));
-    memcpy(&sms->cart, &state->cart, sizeof(sms->cart));
-    memcpy(&sms->memory_control, &state->memory_control, sizeof(sms->memory_control));
-    memcpy(sms->system_ram, state->system_ram, sizeof(sms->system_ram));
+    memcpy(&sms.cpu, &state->cpu, sizeof(sms.cpu));
+    memcpy(&sms.vdp, &state->vdp, sizeof(sms.vdp));
+    memcpy(&sms.psg, &state->psg, sizeof(sms.psg));
+    memcpy(&sms.cart, &state->cart, sizeof(sms.cart));
+    memcpy(&sms.memory_control, &state->memory_control, sizeof(sms.memory_control));
+    memcpy(sms.system_ram, state->system_ram, sizeof(sms.system_ram));
 
     // we need to reload the mapper pointers!
-    mapper_update(sms);
-    vdp_mark_palette_dirty(sms);
+    mapper_update();
+    vdp_mark_palette_dirty();
 
     return true;
 }
@@ -518,15 +510,15 @@ bool SMS_parity8(uint8_t value)
     #endif
 }
 
-void SMS_run(struct SMS_Core* sms, size_t cycles)
+void SMS_run(size_t cycles)
 {
-    for (size_t i = 0; i < cycles; i += sms->cpu.cycles)
+    for (size_t i = 0; i < cycles; i += sms.cpu.cycles)
     {
-        z80_run(sms);
-        vdp_run(sms->cpu.cycles);
-        psg_run(sms->cpu.cycles);
+        z80_run();
+        vdp_run(sms.cpu.cycles);
+        psg_run(sms.cpu.cycles);
 
-        assert(sms->cpu.cycles != 0);
+        assert(sms.cpu.cycles != 0);
     }
 
     //psg_sync(sms);

@@ -5,24 +5,26 @@ This repo contains a master system emulator for the badge. It doesn't currently 
 # Features
 
 * It runs SEGA Master System games 
-* CPU runs at 100% speed
-* Only ever other frame is rendered (30 FPS)
+* CPU runs at 100% speed for all games I've tested
+* Frame updates around 60 FPS so transparency effects work
 * Audio support
 * The border of the screen is the correct overscan color
+* Pause button! (select)
 
 # TODO
 
+* Load/save emulator state
 * Add a menu for settings
 * Add a cheat menu
 * Add a ROM loader menu
 * Add a way to download roms from the internet
 
 # How to build
-Add a game as `main/rom.sms`
 
 ```
 git clone --recursive https://github.com/hpvb/mch2022-esp32-app-sms
 cd mch2022-esp32-app-sms
+# Add a game as `main/rom.sms`
 make
 ```
 
@@ -31,6 +33,8 @@ This is based on the https://github.com/badgeteam/mch2022-template-app, you can 
 # Thanks
 
 * The excellent TotalSMS emulator https://github.com/ITotalJustice/TotalSMS
-* The excellent people in the badge tent for helping me work out the ESP-IDF stuff
+* The generous people in the badge tent for helping me work out the ESP-IDF stuff
+* The patient and kind people in the badge.team Telegram
+* Sylvian Munaut for the FPGA bitstream to achieve 60FPS
 * SEGA? sure why not
 

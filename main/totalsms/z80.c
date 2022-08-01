@@ -1694,7 +1694,7 @@ static FORCE_INLINE void execute_IXIY(uint8_t* ixy_hi, uint8_t* ixy_lo)
         case 0xCB: execute_CB_IXIY(pair); break;
 
         default:
-            SMS_log_fatal("UNK OP: 0xFD%02X\n", opcode);
+            SMS_log_fatal("UNK OP: 0xFD%02X", opcode);
             break;
     }
 
@@ -1831,7 +1831,7 @@ static FORCE_INLINE void execute_ED()
         case 0xBB: OTDR(); break;
 
         default:
-            SMS_log_fatal("UNK OP: 0xED%02X\n", opcode);
+            SMS_log_fatal("UNK OP: 0xED%02X", opcode);
             break;
     }
 }
@@ -2045,7 +2045,7 @@ static FORCE_INLINE void execute()
         case 0xFD: execute_IXIY(&REG_IYH, &REG_IYL); break;
 
         default:
-            SMS_log_fatal("UNK OP: 0x%02X\n", opcode);
+            SMS_log_fatal("UNK OP: 0x%02X", opcode);
             break;
     }
 }

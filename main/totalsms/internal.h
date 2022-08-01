@@ -4,7 +4,11 @@
 extern "C" {
 #endif
 
+#include "esp_log.h"
 #include "types.h"
+
+#undef TAG
+#define TAG "TotalSMS"
 
 // if neither set, check compiler, else, default to little
 #if !defined(SMS_LITTLE_ENDIAN) && !defined(SMS_BIG_ENDIAN)
@@ -91,11 +95,9 @@ extern "C" {
 #define ARRAY_SIZE(array) (sizeof(array) / sizeof(array[0]))
 
 #if SMS_DEBUG
-    #include <stdio.h>
-    #include <assert.h>
-    #define SMS_log(...) fprintf(stdout, __VA_ARGS__)
-    #define SMS_log_err(...) fprintf(stdout, __VA_ARGS__)
-    #define SMS_log_fatal(...) do { fprintf(stdout, __VA_ARGS__); assert(0); } while(0)
+    #define SMS_log(...) ESP_LOGI(TAG, __VA_ARGS__)
+    #define SMS_log_err(...) ESP_LOGE(TAG, __VA_ARGS__)
+    #define SMS_log_fatal(...) do { ESP_LOGE(TAG, __VA_ARGS__); assert(0); } while(0)
 #else
     #define SMS_log(...)
     #define SMS_log_err(...)
@@ -134,12 +136,13 @@ SMS_INLINE uint8_t vdp_status_flag_read();
 SMS_INLINE void vdp_io_write(uint8_t addr, uint8_t value);
 SMS_FORCE_INLINE bool vdp_has_interrupt();
 SMS_FORCE_INLINE void vdp_run(uint8_t cycles);
+SMS_FORCE_INLINE void vdp_update_color(const uint16_t pattern_index);
 
 // [MISC]
-SMS_STATIC bool SMS_has_bios(const struct SMS_Core* sms);
+SMS_STATIC bool SMS_has_bios();
 SMS_FORCE_INLINE bool SMS_parity16(uint16_t value);
 SMS_FORCE_INLINE bool SMS_parity8(uint8_t value);
-SMS_STATIC bool SMS_is_spiderman_int_hack_enabled(const struct SMS_Core* sms);
+SMS_STATIC bool SMS_is_spiderman_int_hack_enabled();
 SMS_STATIC void vdp_mark_palette_dirty();
 
 #ifdef __cplusplus

@@ -7,3 +7,4 @@ entries:
 archive: libspi-ili9341.a
 entries:
     * (noflash)
+

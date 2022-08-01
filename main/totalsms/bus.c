@@ -16,7 +16,7 @@ static uint8_t UNUSED_BANK[0x400];
 static void sega_mapper_update_slot0()
 {
     // if we have bios and is loaded, do not map rom here!
-    if (SMS_has_bios(&sms) && !sms.memory_control.bios_rom_disable)
+    if (SMS_has_bios() && !sms.memory_control.bios_rom_disable)
     {
         return;
     }
@@ -84,7 +84,7 @@ static void setup_mapper_none()
     // sg only has 1k of ram
     // todo: maybe have different variants of MAPPER_NONE for each system?
     // such as sms, sg, msx etc
-    const uint8_t ram_mask = SMS_is_system_type_sg(&sms) ? 0x0 : 0x7;
+    const uint8_t ram_mask = SMS_is_system_type_sg() ? 0x0 : 0x7;
 
     for (int i = 0; i < 0x10; ++i)
     {
@@ -319,9 +319,9 @@ void mapper_update()
     // map the bios is enabled (if we have it)
     if (!sms.memory_control.bios_rom_disable)
     {
-        assert(SMS_has_bios(&sms) && "bios was mapped, but we dont have it!");
+        assert(SMS_has_bios() && "bios was mapped, but we dont have it!");
 
-        if (SMS_has_bios(&sms))
+        if (SMS_has_bios())
         {
             // usually 8 (8kib)
             const size_t map_max = sms.bios_size / 0x400;
@@ -384,7 +384,7 @@ static void sega_mapper_fffx_write(const uint16_t addr, const uint8_t value)
             if (sms.cart.mappers.sega.fffc.ram_enable_80000)
             {
                 sega_mapper_update_ram0();
-                SMS_log("game is mapping sram to rom region 0x8000!\n");
+                SMS_log("game is mapping sram to rom region 0x8000!");
             }
             else
             {
@@ -495,19 +495,19 @@ static void IO_memory_control_write(const uint8_t value)
     sms.memory_control.io_chip_disable   = IS_BIT_SET(value, 2);
 
     // bios either unmapped itself (likely) or got re-mapped (impossible)
-    if (SMS_has_bios(&sms) && old.bios_rom_disable != sms.memory_control.bios_rom_disable)
+    if (SMS_has_bios() && old.bios_rom_disable != sms.memory_control.bios_rom_disable)
     {
-        mapper_update(sms);
+        mapper_update();
     }
 
-    SMS_log("[memory_control]\n");
-    SMS_log("\tmemory_control.exp_slot_disable: %u\n", sms.memory_control.exp_slot_disable);
-    SMS_log("\tmemory_control.cart_slot_disable: %u\n", sms.memory_control.cart_slot_disable);
-    SMS_log("\tmemory_control.card_slot_disable: %u\n", sms.memory_control.card_slot_disable);
-    SMS_log("\tmemory_control.work_ram_disable: %u\n", sms.memory_control.work_ram_disable);
-    SMS_log("\tmemory_control.bios_rom_disable: %u\n", sms.memory_control.bios_rom_disable);
-    SMS_log("\tmemory_control.io_chip_disable: %u\n", sms.memory_control.io_chip_disable);
-    // assert(&sms.memory_control.work_ram_disable == 0 && "wram disabled!");
+    SMS_log("[memory_control]");
+    SMS_log("\tmemory_control.exp_slot_disable: %u", sms.memory_control.exp_slot_disable);
+    SMS_log("\tmemory_control.cart_slot_disable: %u", sms.memory_control.cart_slot_disable);
+    SMS_log("\tmemory_control.card_slot_disable: %u", sms.memory_control.card_slot_disable);
+    SMS_log("\tmemory_control.work_ram_disable: %u", sms.memory_control.work_ram_disable);
+    SMS_log("\tmemory_control.bios_rom_disable: %u", sms.memory_control.bios_rom_disable);
+    SMS_log("\tmemory_control.io_chip_disable: %u", sms.memory_control.io_chip_disable);
+    // assert(.memory_control.work_ram_disable == 0 && "wram disabled!");
 }
 
 // todo: PORT 0x3F
@@ -527,7 +527,7 @@ static void IO_control_write(const uint8_t value)
     // 0, 2, 4, 5, 6, 7
     // 0, 2, 4, 6
     (void)sms; (void)value;
-    SMS_log("IO_control_write: 0x%02X\n", value);
+    SMS_log("IO_control_write: 0x%02X", value);
 }
 
 static uint8_t IO_read_vcounter()
@@ -617,7 +617,7 @@ static void IO_vdp_data_write(const uint8_t value)
             break;
 
         case VDP_CODE_CRAM_WRITE:
-            switch (SMS_get_system_type(&sms))
+            switch (SMS_get_system_type())
             {
                 case SMS_System_SMS:
                     IO_vdp_cram_sms_write(value);
@@ -722,7 +722,7 @@ uint8_t SMS_read_io(const uint8_t addr)
     {
         case 0x00: case 0x01: case 0x02: case 0x03:
         case 0x04: case 0x05:
-            if (SMS_is_system_type_gg(&sms))
+            if (SMS_is_system_type_gg())
             {
                 return IO_gamegear_read(addr);
             }
@@ -748,7 +748,7 @@ uint8_t SMS_read_io(const uint8_t addr)
         case 0x38: case 0x39: case 0x3A: case 0x3B:
         case 0x3C: case 0x3D: case 0x3E: case 0x3F:
             // note: ristar (GG) reads from port $22 for some reason...
-            SMS_log("[PORT-READ] 0x%02X last byte of the instruction\n", addr);
+            SMS_log("[PORT-READ] 0x%02X last byte of the instruction", addr);
             return 0xFF; // todo:
 
         case 0x40: case 0x42: case 0x44: case 0x46:
@@ -822,7 +822,7 @@ void SMS_write_io(const uint8_t addr, const uint8_t value)
         // GG regs
         case 0x00: case 0x01: case 0x02: case 0x03:
         case 0x04: case 0x05: case 0x06:
-            if (SMS_is_system_type_gg(&sms))
+            if (SMS_is_system_type_gg())
             {
                 IO_gamegear_write(addr, value);
             }

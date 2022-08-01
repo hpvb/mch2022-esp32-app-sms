@@ -26,30 +26,36 @@ SOFTWARE.
 
 #include <string.h>
 
+#include "ice40-lcd.h"
 #include "main.h"
 #include "videobuffer.h"
 #include "ws2812.h"
 #include "sms.h"
+
+#undef TAG
+#define TAG "SMS"
 
 extern const uint8_t rom_start[] asm("_binary_rom_sms_start");
 extern const uint8_t rom_end[] asm("_binary_rom_sms_end");
 
 static bool current_backbuffer = 0;
 videobuffer_t* backbuffer[2];
-static uint16_t *framebuffer = NULL;
+
+#define OVERSCAN_BUFFER_SIZE 1024
+static uint8_t *overscan_buffer = NULL;
 
 static uint64_t frames = 0;
 static uint64_t cpu_cycles = 0;
 static uint64_t dropped_frames = 0;
 static uint64_t frame_time = 0;
+static uint64_t cpu_time = 0;
+static uint64_t vdp_time = 0;
 
-static xQueueHandle buttonQueue;
-static QueueHandle_t videoQueue;
+static xQueueHandle button_queue;
+static QueueHandle_t video_queue;
+
 ILI9341 *ili9341 = NULL;
-
-// Apparently we're not supposed to call these directly.
-esp_err_t ili9341_send(ILI9341 *device, const uint8_t *data, const int len, const bool dc_level);
-esp_err_t ili9341_set_addr_window(ILI9341 *device, uint16_t x, uint16_t y, uint16_t w, uint16_t h);
+ICE40 *ice40 = NULL;
 
 struct SMS_Core sms;
 
@@ -67,24 +73,14 @@ __attribute__((always_inline)) inline uint32_t core_colour_callback(void *user, 
 }
 
 volatile bool currently_drawing;
-// This avoids some safety checks and a mutex we can't afford
 __attribute__((always_inline)) inline static void write_frame(bool frame) {
   currently_drawing = true;
-  ili9341->dc_level = true;
 
   uint64_t start = esp_timer_get_time();
   uint64_t end;
 
-  spi_transaction_t transaction = {
-    .length = backbuffer[frame]->part_size * 8,
-    .tx_buffer = NULL,
-    .user = (void*)ili9341,
-  };
-
   for(int i = 0; i < backbuffer[frame]->part_numb; ++i) {
-    transaction.tx_buffer = backbuffer[frame]->parts[i];
-    spi_device_polling_transmit(ili9341->spi_device, &transaction);
-    ets_delay_us(10);
+    ice40_lcd_send_turbo(ice40, ((uint8_t*)backbuffer[frame]->parts[i]) - 1, backbuffer[frame]->part_size + 1);
   }
 
   currently_drawing = false;
@@ -98,7 +94,7 @@ __attribute__((always_inline)) inline static void write_frame(bool frame) {
 __attribute__((always_inline)) inline void core_vblank_callback(void *user) {
   while (currently_drawing) { }
 
-  if (xQueueSend(videoQueue, &current_backbuffer, 0) == errQUEUE_FULL) {
+  if (xQueueSend(video_queue, &current_backbuffer, 0) == errQUEUE_FULL) {
     ++dropped_frames;
   }
 
@@ -106,16 +102,13 @@ __attribute__((always_inline)) inline void core_vblank_callback(void *user) {
   sms.pixels = backbuffer[current_backbuffer];
 }
 
-volatile bool videoTaskIsRunning = false;
 void videoTask(void *arg) {
-  videoTaskIsRunning = true;
   bool param;
   while (1) {
-    xQueuePeek(videoQueue, &param, portMAX_DELAY);
+    xQueuePeek(video_queue, &param, portMAX_DELAY);
     write_frame(param);
-    xQueueReceive(videoQueue, &param, portMAX_DELAY);
+    xQueueReceive(video_queue, &param, portMAX_DELAY);
   }
-  videoTaskIsRunning = false;
   vTaskDelete(NULL);
 }
 
@@ -125,31 +118,31 @@ static void handle_input() {
   rp2040_input_message_t buttonMessage = {0};
   BaseType_t queueResult;
   do {
-    queueResult = xQueueReceive(buttonQueue, &buttonMessage, 0);
+    queueResult = xQueueReceive(button_queue, &buttonMessage, 0);
     if (queueResult == pdTRUE) {
       uint8_t button = buttonMessage.input;
       bool value = buttonMessage.state;
       switch (button) {
       case RP2040_INPUT_JOYSTICK_DOWN:
-        SMS_set_port_a(&sms, JOY1_DOWN_BUTTON, value);
+        SMS_set_port_a(JOY1_DOWN_BUTTON, value);
         break;
       case RP2040_INPUT_JOYSTICK_UP:
-        SMS_set_port_a(&sms, JOY1_UP_BUTTON, value);
+        SMS_set_port_a(JOY1_UP_BUTTON, value);
         break;
       case RP2040_INPUT_JOYSTICK_LEFT:
-        SMS_set_port_a(&sms, JOY1_LEFT_BUTTON, value);
+        SMS_set_port_a(JOY1_LEFT_BUTTON, value);
         break;
       case RP2040_INPUT_JOYSTICK_RIGHT:
-        SMS_set_port_a(&sms, JOY1_RIGHT_BUTTON, value);
+        SMS_set_port_a(JOY1_RIGHT_BUTTON, value);
         break;
       case RP2040_INPUT_BUTTON_ACCEPT:
-        SMS_set_port_a(&sms, JOY1_A_BUTTON, value);
+        SMS_set_port_a(JOY1_A_BUTTON, value);
         break;
       case RP2040_INPUT_BUTTON_BACK:
-        SMS_set_port_a(&sms, JOY1_B_BUTTON, value);
+        SMS_set_port_a(JOY1_B_BUTTON, value);
         break;
       case RP2040_INPUT_BUTTON_START:
-        SMS_set_port_a(&sms, PAUSE_BUTTON, value);
+        SMS_set_port_a(PAUSE_BUTTON, value);
         break;
       case RP2040_INPUT_BUTTON_SELECT:
 	if (! select_down) {
@@ -171,7 +164,7 @@ static void handle_input() {
 
 #define AUDIO_FREQ 11200
 #define AUDIO_BLOCK_SIZE 256
-static uint16_t audio_buffer[AUDIO_BLOCK_SIZE];
+static uint16_t* audio_buffer;
 static uint32_t audio_idx = 0;
 
 void audio_init() {
@@ -185,7 +178,7 @@ void audio_init() {
       .dma_buf_len          = AUDIO_BLOCK_SIZE / 4,
       .intr_alloc_flags     = 0,
       .use_apll             = true,
-      .tx_desc_auto_clear   = true
+      .tx_desc_auto_clear   = false, 
    };
 
     i2s_driver_install(0, &i2s_config, 0, NULL);
@@ -201,7 +194,8 @@ void audio_init() {
     i2s_set_pin(0, &pin_config);
     i2s_set_sample_rates(0, AUDIO_FREQ);
 
-    printf("Audio initialized!\n");
+    audio_buffer = malloc(AUDIO_BLOCK_SIZE * sizeof(uint16_t));
+    ESP_LOGI(TAG, "Audio initialized!");
 }
 
 __attribute__((always_inline)) inline void core_apu_callback(void* user, struct SMS_ApuCallbackData* data) {
@@ -212,7 +206,7 @@ __attribute__((always_inline)) inline void core_apu_callback(void* user, struct 
   if (audio_idx >= AUDIO_BLOCK_SIZE) {
     size_t count;
     
-    i2s_write(0, audio_buffer, sizeof(audio_buffer), &count, portMAX_DELAY);
+    i2s_write(0, audio_buffer, AUDIO_BLOCK_SIZE * 2, &count, portMAX_DELAY);
     audio_idx = 0;
   }
 
@@ -251,51 +245,70 @@ static void sonic2_leds() {
 }
 
 void init_screen_rect() {
-  // We set this only once, saves us some more SPI bandwidth
-  ili9341_set_addr_window(ili9341, (ILI9341_WIDTH - SMS_SCREEN_WIDTH) / 2,
-                          (ILI9341_HEIGHT - SMS_SCREEN_HEIGHT) / 2,
-                          SMS_SCREEN_WIDTH, SMS_SCREEN_HEIGHT);
-
+  ice40_lcd_set_addr_window(ice40,
+      ((ILI9341_WIDTH - SMS_SCREEN_WIDTH) / 2) - 4,
+      (ILI9341_HEIGHT - SMS_SCREEN_HEIGHT) / 2,
+      SMS_SCREEN_WIDTH,
+      SMS_SCREEN_HEIGHT);
 }
 
 #define MIN(x, y) (((x) < (y)) ? (x) : (y))
 __attribute__((always_inline)) inline void write_screen(uint8_t* buffer, size_t size) {
-  for(int i = 0; i < size / ili9341->spi_max_transfer_size + 1; ++i) {
-    size_t length = MIN(ili9341->spi_max_transfer_size, size - (i * ili9341->spi_max_transfer_size));
-    if (length) ili9341_send(ili9341, buffer, length, true);
+  for(int i = 0; i < (size / OVERSCAN_BUFFER_SIZE) + 1; ++i) {
+    size_t length = MIN(OVERSCAN_BUFFER_SIZE, size - (i * OVERSCAN_BUFFER_SIZE));
+    if (length) ice40_lcd_send_turbo(ice40, buffer, length + 1);
   }
 }
 
 void set_overscan_border(uint16_t color) {
+  // Don't try to interleave this with regular frame data, bad things will happen
   while (currently_drawing) {}
 
-  for (uint32_t i = 0; i < ili9341->spi_max_transfer_size / 2; ++i) {
-    framebuffer[i] = color;
+  overscan_buffer[0] = 0xf3;
+  for (uint32_t i = 1; i < OVERSCAN_BUFFER_SIZE + 1; i += 2) {
+    *(overscan_buffer + i) = color;
+    *(overscan_buffer + i + 1) = color >> 8;
   }
 
   // This is not a mistake, we're in 16bpp
   size_t top = ILI9341_WIDTH * (ILI9341_HEIGHT - SMS_SCREEN_HEIGHT);
-  size_t side = (ILI9341_WIDTH - SMS_SCREEN_WIDTH) * SMS_SCREEN_HEIGHT; 
+  size_t bottom = top;
+  size_t leftside = (ILI9341_WIDTH - SMS_SCREEN_WIDTH - 8) * SMS_SCREEN_HEIGHT;
+  size_t rightside = (ILI9341_WIDTH - SMS_SCREEN_WIDTH + 8) * SMS_SCREEN_HEIGHT;
 
-  ili9341_set_addr_window(ili9341, 0, 0, ILI9341_WIDTH, (ILI9341_HEIGHT - SMS_SCREEN_HEIGHT) / 2);
-  write_screen((uint8_t*)framebuffer, top);
-  ili9341_set_addr_window(ili9341, 0, (ILI9341_HEIGHT - (ILI9341_HEIGHT - SMS_SCREEN_HEIGHT) / 2), ILI9341_WIDTH, (ILI9341_HEIGHT - SMS_SCREEN_HEIGHT) / 2);
-  write_screen((uint8_t*)framebuffer, top);
-  ili9341_set_addr_window(ili9341, 0, (ILI9341_HEIGHT - SMS_SCREEN_HEIGHT) / 2, (ILI9341_WIDTH - SMS_SCREEN_WIDTH) / 2, ILI9341_HEIGHT - (ILI9341_HEIGHT - SMS_SCREEN_HEIGHT));
-  write_screen((uint8_t*)framebuffer, side);
-  ili9341_set_addr_window(
-    ili9341, ILI9341_WIDTH - ((ILI9341_WIDTH - SMS_SCREEN_WIDTH) / 2),
-    (ILI9341_HEIGHT - SMS_SCREEN_HEIGHT) / 2,
-    (ILI9341_WIDTH - SMS_SCREEN_WIDTH) / 2,
-    ILI9341_HEIGHT - (ILI9341_HEIGHT - SMS_SCREEN_HEIGHT)
-  );
-  write_screen((uint8_t*)framebuffer, side);
+  ice40_lcd_set_addr_window(ice40,
+      0,
+      0,
+      ILI9341_WIDTH,
+      (ILI9341_HEIGHT - SMS_SCREEN_HEIGHT) / 2);
+  write_screen(overscan_buffer, top);
+
+  ice40_lcd_set_addr_window(ice40,
+      0,
+      (ILI9341_HEIGHT - (ILI9341_HEIGHT - SMS_SCREEN_HEIGHT) / 2),
+      ILI9341_WIDTH,
+      (ILI9341_HEIGHT - SMS_SCREEN_HEIGHT) / 2);
+  write_screen(overscan_buffer, bottom);
+
+  ice40_lcd_set_addr_window(ice40,
+      0,
+      (ILI9341_HEIGHT - SMS_SCREEN_HEIGHT) / 2,
+      ((ILI9341_WIDTH - SMS_SCREEN_WIDTH) / 2) - 4,
+      ILI9341_HEIGHT - (ILI9341_HEIGHT - SMS_SCREEN_HEIGHT));
+  write_screen(overscan_buffer, leftside);
+
+  ice40_lcd_set_addr_window(ice40,
+      (ILI9341_WIDTH - ((ILI9341_WIDTH - SMS_SCREEN_WIDTH) / 2)) - 4,
+      (ILI9341_HEIGHT - SMS_SCREEN_HEIGHT) / 2,
+      ((ILI9341_WIDTH - SMS_SCREEN_WIDTH) / 2) + 4,
+      ILI9341_HEIGHT - (ILI9341_HEIGHT - SMS_SCREEN_HEIGHT));
+  write_screen(overscan_buffer, rightside);
 
   init_screen_rect();
 }
 
 static void available_ram(const char *context) {
-  printf("(%s) Available DRAM: %i, Largest block: %i, Available SPIRAM: %i\n",
+  ESP_LOGI(TAG, "(%s) Available DRAM: %i, Largest block: %i, Available SPIRAM: %i",
       context,
       heap_caps_get_free_size(MALLOC_CAP_8BIT | MALLOC_CAP_DMA),
       heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DMA),
@@ -318,9 +331,17 @@ void main_loop() {
       continue;
     }
 
-    for (size_t i = 0; i < SMS_CPU_CLOCK / 60; i += sms.cpu.cycles) {
+    for (size_t i = 0; i < SMS_CPU_CLOCK / 30; i += sms.cpu.cycles) {
+      //uint64_t cpu_start = esp_timer_get_time();
       z80_run();
+      //uint64_t cpu_end = esp_timer_get_time();
+      //cpu_time += cpu_end - cpu_start;
+
+      //uint64_t vdp_start = esp_timer_get_time();
       vdp_run(sms.cpu.cycles);
+      //uint64_t vdp_end = esp_timer_get_time();
+      //vdp_time += vdp_end - vdp_start;
+      
       psg_run(sms.cpu.cycles);
       cpu_cycles += sms.cpu.cycles;
 
@@ -346,55 +367,64 @@ void main_loop() {
 
     end = esp_timer_get_time();
     if ((end - start) >= 1000000) {
-      printf("cpu_mhz: %.6f, fps: %lli, dropped: %lli, avg_frametime: %lli\n",
-        cpu_cycles / 1000000.00, frames, dropped_frames, frame_time / frames);
 
-      if (cpu_cycles < 3579545)
+      if (cpu_cycles < 3579545) {
         set_overscan_border(0x00f0);
-      else
+
+        ESP_LOGW(TAG, "cpu_mhz: %.6f, fps: %lli, dropped: %lli, avg_frametime: %lli, avg_cputime: %lli, avg_vdptime: %lli",
+          cpu_cycles / 1000000.00, frames, dropped_frames, frame_time / frames, cpu_time / frames, vdp_time / frames);
+      } else {
         set_overscan_border(current_overscan_color);
+
+        ESP_LOGI(TAG, "cpu_mhz: %.6f, fps: %lli, dropped: %lli, avg_frametime: %lli, avg_cputime: %lli, avg_vdptime: %lli",
+          cpu_cycles / 1000000.00, frames, dropped_frames, frame_time / frames, cpu_time / frames, vdp_time / frames);
+      }
 
       frames = 0;
       cpu_cycles = 0;
       dropped_frames = 0;
       frame_time = 0;
+      cpu_time = 0;
+      vdp_time = 0;
+
       start = esp_timer_get_time();
     }
   }
 }
 
 void app_main() {
-  printf("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
-  printf("!!!!!!!!!!!!!! Not A Plumber !!!!!!!!!!!!!!!!!\n");
-  printf("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
+  ESP_LOGI(TAG, "\n"
+  "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n"
+  "!!!!!!!!!!!!!! Not A Plumber !!!!!!!!!!!!!!!!!\n"
+  "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n"
 
-  printf("                      _.-*'\"\"`*-._\n");
-  printf("                _.-*'                  `*-._\n");
-  printf("             .-'                            `-.\n");
-  printf("  /`-.    .-'                  _.              `-.\n");
-  printf(" :    `..'                  .-'_ .                `.\n");
-  printf(" |    .'                 .-'_.' \\ .                 \\\n");
-  printf(" |   /                 .' .*     ;               .-'\"\n");
-  printf(" :   L                    `.     | ;          .-'\n");
-  printf("  \\.' `*.          .-*\"*-.  `.   ; |        .'\n");
-  printf("  /      \\        '       `.  `-'  ;      .'\n");
-  printf(" : .'\"`.  .       .-*'`*-.  \\     .      (_\n");
-  printf(" |              .'        \\  .             `*-.\n");
-  printf(" |.     .      /           ;                   `-.\n");
-  printf(" :    db      '       d$b  |                      `-.\n");
-  printf(" .   :PT;.   '       :P\"T; :                         `.\n");
-  printf(" :   :bd;   '        :b_d; :                           \\\n");
-  printf(" |   :$$; `'         :$$$; |                            \\\n");
-  printf(" |    TP              T$P  '                             ;\n");
-  printf(" :                        /.-*'\"`.                       |\n");
-  printf(".sdP^T$bs.               /'       \\\n");
-  printf("$$$._.$$$$b.--._      _.'   .--.   ;\n");
-  printf("`*$$$$$$P*'     `*--*'     '  / \\  :\n");
-  printf("   \\                        .'   ; ;\n");
-  printf("    `.                  _.-'    ' /\n");
-  printf("      `*-.                      .'\n");
-  printf("          `*-._            _.-*'\n");
-  printf("               `*=--..--=*'\n");
+  "                      _.-*'\"\"`*-._\n"
+  "                _.-*'                  `*-._\n"
+  "             .-'                            `-.\n"
+  "  /`-.    .-'                  _.              `-.\n"
+  " :    `..'                  .-'_ .                `.\n"
+  " |    .'                 .-'_.' \\ .                 \\\n"
+  " |   /                 .' .*     ;               .-'\"\n"
+  " :   L                    `.     | ;          .-'\n"
+  "  \\.' `*.          .-*\"*-.  `.   ; |        .'\n"
+  "  /      \\        '       `.  `-'  ;      .'\n"
+  " : .'\"`.  .       .-*'`*-.  \\     .      (_\n"
+  " |              .'        \\  .             `*-.\n"
+  " |.     .      /           ;                   `-.\n"
+  " :    db      '       d$b  |                      `-.\n"
+  " .   :PT;.   '       :P\"T; :                         `.\n"
+  " :   :bd;   '        :b_d; :                           \\\n"
+  " |   :$$; `'         :$$$; |                            \\\n"
+  " |    TP              T$P  '                             ;\n"
+  " :                        /.-*'\"`.                       |\n"
+  ".sdP^T$bs.               /'       \\\n"
+  "$$$._.$$$$b.--._      _.'   .--.   ;\n"
+  "`*$$$$$$P*'     `*--*'     '  / \\  :\n"
+  "   \\                        .'   ; ;\n"
+  "    `.                  _.-'    ' /\n"
+  "      `*-.                      .'\n"
+  "          `*-._            _.-*'\n"
+  "               `*=--..--=*'\n");
 
   available_ram("start");
 
@@ -404,50 +434,60 @@ void app_main() {
   bsp_rp2040_init();
   available_ram("bsp_rp2040_init");
 
+  bsp_ice40_init();
+  available_ram("bsp_ice40_init");
+
   ili9341 = get_ili9341();
+  ice40 = get_ice40();
+
+  ice40_lcd_init(ice40, ili9341);
+  available_ram("ice40_lcd_init");
 
   audio_init();
   available_ram("audio_init");
 
-  buttonQueue = get_rp2040()->queue;
+  gpio_set_direction(GPIO_SD_PWR, GPIO_MODE_OUTPUT);
+  gpio_set_level(GPIO_SD_PWR, 1);
+  ws2812_init(GPIO_LED_DATA);
+  available_ram("ws2812_init");
+
+  button_queue = get_rp2040()->queue;
   // nvs_flash_init();
 
-  framebuffer = heap_caps_malloc(ili9341->spi_max_transfer_size, MALLOC_CAP_SPIRAM);
-  set_overscan_border(0);
-
-  SMS_init(&sms);
+  SMS_init();
   available_ram("SMS_init");
 
-  printf("Starting video thread\n");
-  videoQueue = xQueueCreate(1, sizeof(uint16_t *));
-  xTaskCreatePinnedToCore(&videoTask, "videoTask", 2048, NULL, 5, NULL, 0);
-  available_ram("videoTask");
+  ESP_LOGI(TAG, "Starting video thread");
+  video_queue = xQueueCreate(1, sizeof(uint16_t *));
+  xTaskCreatePinnedToCore(&videoTask, "video_task", 2048, NULL, 5, NULL, 0);
+  available_ram("video_task");
 
-  SMS_set_colour_callback(&sms, core_colour_callback);
-  SMS_set_vblank_callback(&sms, core_vblank_callback);
-  SMS_set_apu_callback(&sms, core_apu_callback, AUDIO_FREQ);
+  SMS_set_colour_callback(core_colour_callback);
+  SMS_set_vblank_callback(core_vblank_callback);
+  SMS_set_apu_callback(core_apu_callback, AUDIO_FREQ);
 
   size_t screen_size = SMS_SCREEN_WIDTH * SMS_SCREEN_HEIGHT * 2;
-  backbuffer[0] = videobuffer_allocate(SMS_SCREEN_WIDTH, SMS_SCREEN_HEIGHT, screen_size / 6144);
-  backbuffer[1] = videobuffer_allocate(SMS_SCREEN_WIDTH, SMS_SCREEN_HEIGHT, screen_size / 6144);
+  backbuffer[0] = videobuffer_allocate(SMS_SCREEN_WIDTH, SMS_SCREEN_HEIGHT, screen_size / 4096);
+  backbuffer[1] = videobuffer_allocate(SMS_SCREEN_WIDTH, SMS_SCREEN_HEIGHT, screen_size / 4096);
   available_ram("backbuffer");
 
-  SMS_set_pixels(&sms, backbuffer[0], SMS_SCREEN_WIDTH, 2);
+  SMS_set_pixels(backbuffer[0], SMS_SCREEN_WIDTH, 2);
 
   size_t rom_size = rom_end - rom_start;
   uint8_t* rom = heap_caps_malloc(rom_size, MALLOC_CAP_SPIRAM);
   if (!rom) {
-    printf("Allocation of rom in SPIRAM failed. Attempted to allocate %i bytes\n", rom_size);
+    ESP_LOGE(TAG, "Allocation of rom in SPIRAM failed. Attempted to allocate %i bytes", rom_size);
   }
   memcpy(rom, rom_start, rom_size);
-  SMS_loadrom(&sms, rom, rom_size, SMS_System_SMS);
-  printf("ROM loaded, crc: 0x%08X\n", sms.crc);
+  SMS_loadrom(rom, rom_size, SMS_System_SMS);
+  ESP_LOGI(TAG, "ROM loaded, crc: 0x%08X", sms.crc);
 
-  gpio_set_direction(GPIO_SD_PWR, GPIO_MODE_OUTPUT);
-  gpio_set_level(GPIO_SD_PWR, 1);
-  ws2812_init(GPIO_LED_DATA);
+  overscan_buffer = heap_caps_malloc(OVERSCAN_BUFFER_SIZE + 1, MALLOC_CAP_SPIRAM);
+  available_ram("overscan_buffer");
+
+  // Also sets screen rect
+  set_overscan_border(0);
 
   available_ram("done initializing");
-
   main_loop();
 }

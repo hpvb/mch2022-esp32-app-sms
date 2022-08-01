@@ -24,33 +24,12 @@ SOFTWARE.
 
 // Sega master system emulator for the MCH2022 badge platform.
 
-#include <stdlib.h>
-#include <stdio.h>
+#include <string.h>
 
-#include "esp_log.h"
+#include "ili9341.h"
+#include "ice40.h"
 
-#include "videobuffer.h"
-
-#undef TAG
-#define TAG "videobuffer"
-
-videobuffer_t* videobuffer_allocate(uint16_t width, uint16_t height, short part_numb) {
-    videobuffer_t* buffer = malloc(sizeof(videobuffer_t));
-    buffer->size = width * height * 2;
-
-    buffer->part_size = buffer->size / part_numb;
-    buffer->lines_per_part = buffer->part_size / (width * 2);
-    buffer->part_numb = part_numb;
-    buffer->real_parts = malloc(part_numb * sizeof(void*));
-    buffer->parts = malloc(part_numb * sizeof(void*));
-
-    for (int i = 0; i < part_numb; ++i) {
-        buffer->real_parts[i] = calloc(buffer->part_size + 1, 1);
-        if (!buffer->real_parts[i])
-           ESP_LOGE(TAG, "Failed to allocate buffer part %i!\n", i);
-        buffer->real_parts[i][0] = 0xf3;
-        buffer->parts[i] = buffer->real_parts[i] + 1;
-    }
-
-    return buffer;
-}
+void ice40_lcd_send_command(ICE40 *ice40, uint8_t cmd, const uint8_t* data, uint8_t size);
+void ice40_lcd_set_addr_window(ICE40 *ice40, uint16_t x, uint16_t y, uint16_t w, uint16_t h);
+void ice40_lcd_send_turbo(ICE40 *ice40, const uint8_t* data, uint32_t length);
+void ice40_lcd_init(ICE40 *ice40, ILI9341 *ili9341);
