@@ -35,6 +35,6 @@ This is based on the https://github.com/badgeteam/mch2022-template-app, you can 
 * The excellent TotalSMS emulator https://github.com/ITotalJustice/TotalSMS
 * The generous people in the badge tent for helping me work out the ESP-IDF stuff
 * The patient and kind people in the badge.team Telegram
-* Sylvian Munaut for the FPGA bitstream to achieve 60FPS
+* Sylvain Munaut for the FPGA bitstream to achieve 60FPS
 * SEGA? sure why not
 
