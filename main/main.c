@@ -69,7 +69,16 @@ void exit_to_launcher() {
 
 // We get 6 bit RGB values, pack them into a byte swapped RGB565 value
 __attribute__((always_inline)) inline uint32_t core_colour_callback(void *user, uint8_t r, uint8_t g, uint8_t b) {
-  return __builtin_bswap16(((((r << 6 ) & 0xF8) << 8) + (((g << 6) & 0xFC) << 3) + (((b << 6) & 0xF8) >> 3)));
+  if (SMS_is_system_type_gg()) {
+    r <<= 4;
+    g <<= 4;
+    b <<= 4;
+  } else {
+    r <<= 6;
+    g <<= 6;
+    b <<= 6;
+  }
+  return __builtin_bswap16((((r & 0xF8) << 8) + ((g & 0xFC) << 3) + ((b & 0xF8) >> 3)));
 }
 
 volatile bool currently_drawing;
@@ -94,7 +103,7 @@ __attribute__((always_inline)) inline static void write_frame(bool frame) {
 __attribute__((always_inline)) inline void core_vblank_callback(void *user) {
   while (currently_drawing) { }
 
-  if (xQueueSend(video_queue, &current_backbuffer, 0) == errQUEUE_FULL) {
+  if (xQueueSend(video_queue, &current_backbuffer, 5) == errQUEUE_FULL) {
     ++dropped_frames;
   }
 

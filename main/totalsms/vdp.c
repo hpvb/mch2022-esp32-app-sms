@@ -1076,6 +1076,7 @@ void vdp_render_frame()
     }
     else // sms / gg render
     {
+
         sprites_parsed = false;
 
         r_param.scanline = scanline;
@@ -1196,7 +1197,7 @@ void vdp_init()
     if (!render_task_initialized) {
         ESP_LOGI(TAG, "Starting frame render thread");
         render_task_initialized = true;
-        xTaskCreatePinnedToCore(&render_half_frame, "render_frame", 2048, NULL, 6, &render_task, 0);
+        xTaskCreatePinnedToCore(&render_half_frame, "render_frame", 2048, NULL, 7, &render_task, 0);
         col_sem = xSemaphoreCreateMutex();
     }
 }
