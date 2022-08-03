@@ -328,6 +328,7 @@ void main_loop() {
     if (paused) {
       //menu_pause();
       //init_screen_rect();
+      i2s_zero_dma_buffer(0);
       continue;
     }
 
