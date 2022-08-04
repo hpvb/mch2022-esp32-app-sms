@@ -376,18 +376,20 @@ void main_loop() {
     }
 
     end = esp_timer_get_time();
-    if ((end - start) >= 1000000) {
+    double elapsed = end - start;
+    if (elapsed >= 1000000) {
 
-      if (cpu_cycles < 3579545) {
+      double cpu_mhz = cpu_cycles / elapsed;
+      if (cpu_mhz < 3.579545) {
         set_overscan_border(0x00f0);
 
         ESP_LOGW(TAG, "cpu_mhz: %.6f, fps: %lli, dropped: %lli, avg_frametime: %lli, avg_cputime: %lli, avg_vdptime: %lli",
-          cpu_cycles / 1000000.00, frames, dropped_frames, frame_time / frames, cpu_time / frames, vdp_time / frames);
+          cpu_mhz, frames, dropped_frames, frame_time / frames, cpu_time / frames, vdp_time / frames);
       } else {
         set_overscan_border(current_overscan_color);
 
         ESP_LOGI(TAG, "cpu_mhz: %.6f, fps: %lli, dropped: %lli, avg_frametime: %lli, avg_cputime: %lli, avg_vdptime: %lli",
-          cpu_cycles / 1000000.00, frames, dropped_frames, frame_time / frames, cpu_time / frames, vdp_time / frames);
+          cpu_mhz, frames, dropped_frames, frame_time / frames, cpu_time / frames, vdp_time / frames);
       }
 
       frames = 0;
