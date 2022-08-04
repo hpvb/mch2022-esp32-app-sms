@@ -51,6 +51,9 @@ static uint64_t frame_time = 0;
 static uint64_t cpu_time = 0;
 static uint64_t vdp_time = 0;
 
+extern uint64_t vdp_display_enabled;
+extern uint64_t vdp_display_disabled;
+
 static xQueueHandle button_queue;
 static QueueHandle_t video_queue;
 
@@ -341,7 +344,7 @@ void main_loop() {
       continue;
     }
 
-    for (size_t i = 0; i < SMS_CPU_CLOCK / 30; i += sms.cpu.cycles) {
+    for (size_t i = 0; i < SMS_CPU_CLOCK / 60; i += sms.cpu.cycles) {
       //uint64_t cpu_start = esp_timer_get_time();
       z80_run();
       //uint64_t cpu_end = esp_timer_get_time();
@@ -383,13 +386,13 @@ void main_loop() {
       if (cpu_mhz < 3.579545) {
         set_overscan_border(0x00f0);
 
-        ESP_LOGW(TAG, "cpu_mhz: %.6f, fps: %lli, dropped: %lli, avg_frametime: %lli, avg_cputime: %lli, avg_vdptime: %lli",
-          cpu_mhz, frames, dropped_frames, frame_time / frames, cpu_time / frames, vdp_time / frames);
+        ESP_LOGW(TAG, "cpu_mhz: %.6f, fps: %lli, dropped: %lli, avg_frametime: %lli, avg_cputime: %lli, avg_vdptime: %lli, vdp_enabled: %lli, vdp_disabled: %lli",
+          cpu_mhz, frames, dropped_frames, frame_time / frames, cpu_time / frames, vdp_time / frames, vdp_display_enabled, vdp_display_disabled);
       } else {
         set_overscan_border(current_overscan_color);
 
-        ESP_LOGI(TAG, "cpu_mhz: %.6f, fps: %lli, dropped: %lli, avg_frametime: %lli, avg_cputime: %lli, avg_vdptime: %lli",
-          cpu_mhz, frames, dropped_frames, frame_time / frames, cpu_time / frames, vdp_time / frames);
+        ESP_LOGI(TAG, "cpu_mhz: %.6f, fps: %lli, dropped: %lli, avg_frametime: %lli, avg_cputime: %lli, avg_vdptime: %lli, vdp_enabled: %lli, vdp_disabled: %lli",
+          cpu_mhz, frames, dropped_frames, frame_time / frames, cpu_time / frames, vdp_time / frames, vdp_display_enabled, vdp_display_disabled);
       }
 
       frames = 0;
@@ -398,6 +401,9 @@ void main_loop() {
       frame_time = 0;
       cpu_time = 0;
       vdp_time = 0;
+
+      vdp_display_enabled = 0;
+      vdp_display_disabled = 0;
 
       start = esp_timer_get_time();
     }

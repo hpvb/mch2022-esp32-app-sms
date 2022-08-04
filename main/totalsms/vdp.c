@@ -1,7 +1,6 @@
 #include "sms.h"
 #include "internal.h"
 #include "types.h"
-#include <assert.h>
 #include <stdint.h>
 #include <string.h>
 #include <stdio.h>
@@ -1030,6 +1029,8 @@ void render_half_frame() {
   }
 }
 
+uint64_t vdp_display_enabled = 0;
+uint64_t vdp_display_disabled = 0;
 void vdp_render_frame()
 {
     // only render if display is enabled
@@ -1040,8 +1041,10 @@ void vdp_render_frame()
         {
             vdp_parse_sprites();
         }
+        ++vdp_display_disabled;
         return;
     }
+    ++vdp_display_enabled;
 
     // exit early if we have no pixels (this will break games that need sprite overflow and collision)
     if (!sms.pixels || sms.skip_frame)

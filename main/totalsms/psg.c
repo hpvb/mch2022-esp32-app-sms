@@ -92,7 +92,7 @@ static FORCE_INLINE void data_reg_write(const uint8_t value)
     }
 }
 
-void psg_reg_write(const uint8_t value)
+void FORCE_INLINE psg_reg_write(const uint8_t value)
 {
     psg_sync();
 

@@ -5,7 +5,6 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
-#include <assert.h>
 
 extern struct SMS_Core sms;
 
@@ -314,6 +313,7 @@ void mapper_update()
         case MAPPER_TYPE_OTHELLO:
             setup_mapper_othello();
             break;
+        default: __builtin_unreachable();
     }
 
     // map the bios is enabled (if we have it)
@@ -410,16 +410,17 @@ static void sega_mapper_fffx_write(const uint16_t addr, const uint8_t value)
                 sega_mapper_update_slot2();
             }
             break;
+        default: __builtin_unreachable();
     }
 }
 
-uint8_t SMS_read8(const uint16_t addr)
+uint8_t FORCE_INLINE SMS_read8(const uint16_t addr)
 {
     assert(sms.rmap[addr >> 10] && "NULL ptr in rmap!");
     return sms.rmap[addr >> 10][addr & 0x3FF];
 }
 
-void SMS_write8(const uint16_t addr, const uint8_t value)
+void FORCE_INLINE SMS_write8(const uint16_t addr, const uint8_t value)
 {
     // specific mapper writes
     switch (sms.cart.mapper_type)
@@ -462,13 +463,14 @@ void SMS_write8(const uint16_t addr, const uint8_t value)
         case MAPPER_TYPE_THE_CASTLE:
         case MAPPER_TYPE_OTHELLO:
             break;
+        default: __builtin_unreachable();
     }
 
     assert(sms.wmap[addr >> 10] && "NULL ptr in wmap!");
     sms.wmap[addr >> 10][addr & 0x3FF] = value;
 }
 
-uint16_t SMS_read16(const uint16_t addr)
+uint16_t FORCE_INLINE SMS_read16(const uint16_t addr)
 {
     const uint16_t lo = SMS_read8(addr + 0);
     const uint16_t hi = SMS_read8(addr + 1);
@@ -476,7 +478,7 @@ uint16_t SMS_read16(const uint16_t addr)
     return (hi << 8) | lo;
 }
 
-void SMS_write16(const uint16_t addr, const uint16_t value)
+void FORCE_INLINE SMS_write16(const uint16_t addr, const uint16_t value)
 {
     SMS_write8(addr + 0, value & 0xFF);
     SMS_write8(addr + 1, value >> 8);
@@ -634,6 +636,7 @@ static void IO_vdp_data_write(const uint8_t value)
 
             sms.vdp.addr = (sms.vdp.addr + 1) & 0x3FFF;
             break;
+        default: __builtin_unreachable();
     }
 }
 
@@ -665,6 +668,7 @@ static void IO_vdp_control_write(const uint8_t value)
             case VDP_CODE_CRAM_WRITE:
                 sms.vdp.addr = sms.vdp.control_word & 0x3FFF;
                 break;
+            default: __builtin_unreachable(); 
         }
     }
     else
@@ -685,6 +689,7 @@ static uint8_t IO_gamegear_read(const uint8_t addr)
         case 0x3: return /* 0x00; */ sms.port.gg_regs[0x3];
         case 0x4: return /* 0xFF; */ sms.port.gg_regs[0x4];
         case 0x5: return /* 0x00; */ sms.port.gg_regs[0x5];
+        default: __builtin_unreachable();
     }
 
     UNREACHABLE(0xFF);
@@ -810,6 +815,7 @@ uint8_t SMS_read_io(const uint8_t addr)
         case 0xF1: case 0xF3: case 0xF5: case 0xF7:
         case 0xF9: case 0xFB: case 0xFD: case 0xFF:
             return sms.port.b;
+        default: __builtin_unreachable(); 
     }
 
     UNREACHABLE(0xFF);
@@ -899,6 +905,7 @@ void SMS_write_io(const uint8_t addr, const uint8_t value)
         case 0xB1: case 0xB3: case 0xB5: case 0xB7:
         case 0xB9: case 0xBB: case 0xBD: case 0xBF:
             IO_vdp_control_write(value);
-            break;
+             break;
+        default: __builtin_unreachable();
     }
 }

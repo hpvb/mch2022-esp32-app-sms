@@ -21,4 +21,14 @@ idf_component_register(
         segments.lf 
 )
 
-target_compile_options(${COMPONENT_LIB} PRIVATE -Ofast -fjump-tables -ftree-switch-conversion -Wno-unused-function)
+target_compile_options(${COMPONENT_LIB} PRIVATE
+    -Ofast
+    -fjump-tables
+    -ftree-switch-conversion
+    -ftree-loop-im
+    -ftree-loop-ivcanon
+    -fivopts
+    -ftree-vectorize
+    -fvariable-expansion-in-unroller
+    -Wno-unused-function
+)

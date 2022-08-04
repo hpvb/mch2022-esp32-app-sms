@@ -95,6 +95,7 @@ extern "C" {
 #define ARRAY_SIZE(array) (sizeof(array) / sizeof(array[0]))
 
 #if SMS_DEBUG
+    #include <assert.h>
     #define SMS_log(...) ESP_LOGI(TAG, __VA_ARGS__)
     #define SMS_log_err(...) ESP_LOGE(TAG, __VA_ARGS__)
     #define SMS_log_fatal(...) do { ESP_LOGE(TAG, __VA_ARGS__); assert(0); } while(0)

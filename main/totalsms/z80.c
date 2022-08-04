@@ -5,7 +5,6 @@
 
 #include <stdint.h>
 #include <string.h>
-#include <assert.h>
 
 extern struct SMS_Core sms;
 
@@ -232,6 +231,7 @@ static FORCE_INLINE uint8_t get_r8(const uint8_t idx)
         case 0x5: return REG_L;
         case 0x6: return read8(REG_HL);
         case 0x7: return REG_A;
+        default: __builtin_unreachable();
     }
 
     UNREACHABLE(0xFF);
@@ -249,6 +249,7 @@ static FORCE_INLINE void set_r8(const uint8_t value, const uint8_t idx)
         case 0x5: REG_L = value; break;
         case 0x6: write8(REG_HL, value); break;
         case 0x7: REG_A = value; break;
+        default: __builtin_unreachable();
     }
 }
 
@@ -260,6 +261,7 @@ static FORCE_INLINE uint16_t get_r16(const uint8_t idx)
         case 0x1: return REG_DE;
         case 0x2: return REG_HL;
         case 0x3: return REG_SP;
+        default: __builtin_unreachable();
     }
 
     UNREACHABLE(0xFF);
@@ -273,6 +275,7 @@ static FORCE_INLINE void set_r16(uint16_t value, const uint8_t idx)
         case 0x1: SET_REG_DE(value); break;
         case 0x2: SET_REG_HL(value); break;
         case 0x3: REG_SP = value; break;
+        default: __builtin_unreachable();
     }
 }
 
@@ -1471,6 +1474,7 @@ static FORCE_INLINE bool _CB(const uint8_t opcode, const uint8_t value, uint8_t*
         case 0x1C: case 0x1D: case 0x1E: case 0x1F:
             *result = SET(value, 1 << ((opcode >> 3) & 0x7));
             return true;
+        default: __builtin_unreachable();
     }
 
     UNREACHABLE(false);
@@ -1512,6 +1516,7 @@ static FORCE_INLINE void execute_CB_IXIY(uint16_t ixy)
             case 0x5: REG_L = result; break;
             case 0x6: write8(addr, result); break;
             case 0x7: REG_A = result; break;
+            default: __builtin_unreachable();
         }
 
         sms.cpu.cycles += 23;
@@ -1694,14 +1699,15 @@ static FORCE_INLINE void execute_IXIY(uint8_t* ixy_hi, uint8_t* ixy_lo)
         case 0xCB: execute_CB_IXIY(pair); break;
 
         default:
-            SMS_log_fatal("UNK OP: 0xFD%02X", opcode);
+            __builtin_unreachable();
+            //SMS_log_fatal("UNK OP: 0xFD%02X", opcode);
             break;
     }
 
     #undef DISP
 }
 
-static FORCE_INLINE void execute_ED()
+__attribute__((noinline)) static void execute_ED()
 {
     const uint8_t opcode = read8(REG_PC++);
     sms.cpu.cycles += CYC_ED[opcode];
@@ -1831,7 +1837,8 @@ static FORCE_INLINE void execute_ED()
         case 0xBB: OTDR(); break;
 
         default:
-            SMS_log_fatal("UNK OP: 0xED%02X", opcode);
+            __builtin_unreachable();
+            //SMS_log_fatal("UNK OP: 0xED%02X", opcode);
             break;
     }
 }
@@ -2045,7 +2052,8 @@ static FORCE_INLINE void execute()
         case 0xFD: execute_IXIY(&REG_IYH, &REG_IYL); break;
 
         default:
-            SMS_log_fatal("UNK OP: 0x%02X", opcode);
+            __builtin_unreachable();
+            //SMS_log_fatal("UNK OP: 0x%02X", opcode);
             break;
     }
 }

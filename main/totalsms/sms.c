@@ -3,7 +3,6 @@
 #include "types.h"
 #include "rom_database.h"
 
-#include <assert.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
