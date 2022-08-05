@@ -3,8 +3,3 @@ archive: libmain.a
 entries:
     fakelto (noflash)
 
-[mapping:ili9341]
-archive: libspi-ili9341.a
-entries:
-    * (noflash)
-

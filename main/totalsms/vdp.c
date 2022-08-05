@@ -376,15 +376,16 @@ FORCE_INLINE void vdp_update_color(const uint16_t pattern_index)
 {
 }
 
-
+uint64_t cpal_updates = 0;
 FORCE_INLINE struct CachedPalette vdp_get_palette(const uint16_t pattern_index)
 {
     struct CachedPalette* cpal = &VDP.cached_palette[pattern_index >> 2];
 
     // check if one of the 4 bit_planes have changed
-    if (VDP.dirty_vram[pattern_index >> 2])
+    if UNLIKELY(VDP.dirty_vram[pattern_index >> 2])
     {
         VDP.dirty_vram[pattern_index >> 2] = false;
+        ++cpal_updates;
 
         const uint8_t bit_plane0 = VDP.vram[pattern_index + 0];
         const uint8_t bit_plane1 = VDP.vram[pattern_index + 1];
@@ -451,7 +452,7 @@ static void vdp_render_background(pixel_width_t* scanline, struct PriorityBuf* p
         nametable = &VDP.vram[vdp_get_nametable_base_addr() + vertical_offset];
     }
 
-    if (region.startx == 8 && col_start == 0)
+    if UNLIKELY(region.startx == 8 && col_start == 0)
     {
         // render overscan
         const uint8_t palette_index = 16 + vdp_get_overscan_colour();
@@ -512,12 +513,12 @@ static void vdp_render_background(pixel_width_t* scanline, struct PriorityBuf* p
         {
             const uint8_t x_index = (col_8 + x) % SMS_SCREEN_WIDTH;
 
-            if (x_index >= region.endx)
+            if UNLIKELY(x_index >= region.endx)
             {
                 break;
             }
 
-            if (x_index < region.startx)
+            if UNLIKELY(x_index < region.startx)
             {
                 continue;
             }
@@ -819,12 +820,12 @@ static void vdp_render_sprites(pixel_width_t* scanline, const struct PriorityBuf
             const int16_t x_index = x + sprite_x;
 
             // skip if column0 or offscreen
-            if (x_index < region.startx)
+            if UNLIKELY(x_index < region.startx)
             {
                 continue;
             }
 
-            if (x_index >= region.endx)
+            if UNLIKELY(x_index >= region.endx)
             {
                 break;
             }
@@ -832,13 +833,13 @@ static void vdp_render_sprites(pixel_width_t* scanline, const struct PriorityBuf
             const uint8_t palette_index = (palette >> (28 - (4 * x))) & 0xF;
 
             // for sprites, pal0 is transparent
-            if (palette_index == 0)
+            if UNLIKELY(palette_index == 0)
             {
                 continue;
             }
 
             // skip if we already rendered a sprite!
-            if (drawn_sprites[x_index])
+            if UNLIKELY(drawn_sprites[x_index])
             {
                 VDP.sprite_collision = true;
                 continue;
@@ -852,7 +853,7 @@ static void vdp_render_sprites(pixel_width_t* scanline, const struct PriorityBuf
 
             // synchronize
             
-            if (prio->array[x_index])
+            if UNLIKELY(prio->array[x_index])
             {
                 continue;
             }

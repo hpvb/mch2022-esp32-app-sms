@@ -1267,7 +1267,7 @@ static FORCE_INLINE void OUT(const uint8_t value)
     writeIO(REG_C, value);
 }
 
-static FORCE_INLINE void HALT()
+static void HALT()
 {
     assert((sms.cpu.ei_delay || sms.cpu.IFF1) && "halt with interrupts disabled!");
     sms.cpu.halt = true;
@@ -1407,7 +1407,7 @@ static FORCE_INLINE void LD_A_R()
     FLAG_S = REG_A >> 7;
 }
 
-static FORCE_INLINE void isr()
+static void isr()
 {
     if (sms.cpu.ei_delay)
     {
@@ -1447,7 +1447,7 @@ void z80_irq()
 
 // NOTE: templates would be much nicer here
 // returns true if the result needs to be written back (all except BIT)
-static FORCE_INLINE bool _CB(const uint8_t opcode, const uint8_t value, uint8_t* result)
+__attribute__((noinline)) static bool _CB(const uint8_t opcode, const uint8_t value, uint8_t* result)
 {
     switch ((opcode >> 3) & 0x1F)
     {
@@ -1495,7 +1495,7 @@ static FORCE_INLINE void execute_CB()
     sms.cpu.cycles += CYC_CB[opcode]; // pretty sure this isn't accurate
 }
 
-static FORCE_INLINE void execute_CB_IXIY(uint16_t ixy)
+__attribute__((noinline)) static void execute_CB_IXIY(uint16_t ixy)
 {
     // the address is actually fectched before the opcode
     const uint16_t addr = ixy + (int8_t)read8(REG_PC++);

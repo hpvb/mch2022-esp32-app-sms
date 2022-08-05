@@ -53,6 +53,7 @@ static uint64_t vdp_time = 0;
 
 extern uint64_t vdp_display_enabled;
 extern uint64_t vdp_display_disabled;
+extern uint64_t cpal_updates;
 
 static xQueueHandle button_queue;
 static QueueHandle_t video_queue;
@@ -386,13 +387,13 @@ void main_loop() {
       if (cpu_mhz < 3.579545) {
         set_overscan_border(0x00f0);
 
-        ESP_LOGW(TAG, "cpu_mhz: %.6f, fps: %lli, dropped: %lli, avg_frametime: %lli, avg_cputime: %lli, avg_vdptime: %lli, vdp_enabled: %lli, vdp_disabled: %lli",
-          cpu_mhz, frames, dropped_frames, frame_time / frames, cpu_time / frames, vdp_time / frames, vdp_display_enabled, vdp_display_disabled);
+        ESP_LOGW(TAG, "cpu_mhz: %.6f, fps: %lli, dropped: %lli, avg_frametime: %lli, avg_cputime: %lli, avg_vdptime: %lli, vdp_enabled: %lli, vdp_disabled: %lli, cpal_updates: %lli",
+          cpu_mhz, frames, dropped_frames, frame_time / frames, cpu_time / frames, vdp_time / frames, vdp_display_enabled, vdp_display_disabled, cpal_updates);
       } else {
         set_overscan_border(current_overscan_color);
 
-        ESP_LOGI(TAG, "cpu_mhz: %.6f, fps: %lli, dropped: %lli, avg_frametime: %lli, avg_cputime: %lli, avg_vdptime: %lli, vdp_enabled: %lli, vdp_disabled: %lli",
-          cpu_mhz, frames, dropped_frames, frame_time / frames, cpu_time / frames, vdp_time / frames, vdp_display_enabled, vdp_display_disabled);
+        ESP_LOGI(TAG, "cpu_mhz: %.6f, fps: %lli, dropped: %lli, avg_frametime: %lli, avg_cputime: %lli, avg_vdptime: %lli, vdp_enabled: %lli, vdp_disabled: %lli, cpal_updates: %lli",
+          cpu_mhz, frames, dropped_frames, frame_time / frames, cpu_time / frames, vdp_time / frames, vdp_display_enabled, vdp_display_disabled, cpal_updates);
       }
 
       frames = 0;
@@ -404,6 +405,7 @@ void main_loop() {
 
       vdp_display_enabled = 0;
       vdp_display_disabled = 0;
+      cpal_updates = 0;
 
       start = esp_timer_get_time();
     }
