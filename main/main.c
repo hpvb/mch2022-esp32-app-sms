@@ -51,10 +51,6 @@ static uint64_t frame_time = 0;
 static uint64_t cpu_time = 0;
 static uint64_t vdp_time = 0;
 
-extern uint64_t vdp_display_enabled;
-extern uint64_t vdp_display_disabled;
-extern uint64_t cpal_updates;
-
 static xQueueHandle button_queue;
 static QueueHandle_t video_queue;
 static SemaphoreHandle_t video_mutex;
@@ -175,6 +171,7 @@ static void handle_input() {
 
 #define AUDIO_FREQ 22000
 #define AUDIO_BLOCK_SIZE 256
+#define AUDIO_DMA_BUF_COUNT 8
 static uint16_t* audio_buffer;
 static uint32_t audio_idx = 0;
 
@@ -185,7 +182,7 @@ void audio_init() {
       .bits_per_sample      = I2S_BITS_PER_SAMPLE_16BIT,
       .channel_format       = I2S_CHANNEL_FMT_RIGHT_LEFT,
       .communication_format = I2S_COMM_FORMAT_STAND_MSB,
-      .dma_buf_count        = 4,
+      .dma_buf_count        = AUDIO_DMA_BUF_COUNT,
       .dma_buf_len          = AUDIO_BLOCK_SIZE / 4,
       .intr_alloc_flags     = 0,
       .use_apll             = true,
@@ -209,6 +206,14 @@ void audio_init() {
     if (!audio_buffer) {
         ESP_LOGE(TAG, "Failed to allocate audio buffer");
     }
+
+    size_t count;
+    // Make sure our DMA buffers are allocated before we begin
+    for (int i = 0; i < AUDIO_DMA_BUF_COUNT; ++i) {
+      i2s_write(0, audio_buffer, AUDIO_BLOCK_SIZE * 2, &count, portMAX_DELAY);
+    }
+
+    i2s_zero_dma_buffer(0);
     ESP_LOGI(TAG, "Audio initialized!");
 }
 
@@ -340,6 +345,7 @@ void main_loop() {
   uint16_t overscan_color = 0;
   uint16_t current_overscan_color = 0;
 
+  uint8_t frame_intervals = 0;
   while (1) {
     handle_input();
    
@@ -369,6 +375,7 @@ void main_loop() {
     
     psg_sync();
     vTaskDelayUntil(&xLastWakeTime, 2);
+    ++frame_intervals;
 
     current_overscan_color = sms.vdp.colour[16 + (sms.vdp.registers[0x7] & 0xF)];
     if (overscan_color != current_overscan_color) {
@@ -385,21 +392,21 @@ void main_loop() {
       break;
     }
 
-    end = esp_timer_get_time();
-    double elapsed = end - start;
-    if (elapsed >= 1000000) {
+    if (frame_intervals == 60) {
+      end = esp_timer_get_time();
+      double elapsed = end - start;
 
       double cpu_mhz = cpu_cycles / elapsed;
-      if (cpu_mhz < 3.579545) {
+      if (cpu_mhz < 3.56) {
         set_overscan_border(0x00f0);
 
-        ESP_LOGW(TAG, "cpu_mhz: %.6f, fps: %lli, dropped: %lli, avg_frametime: %lli, avg_cputime: %lli, avg_vdptime: %lli, vdp_enabled: %lli, vdp_disabled: %lli, cpal_updates: %lli",
-          cpu_mhz, frames, dropped_frames, frame_time / frames, cpu_time / frames, vdp_time / frames, vdp_display_enabled, vdp_display_disabled, cpal_updates);
+        ESP_LOGW(TAG, "cpu_mhz: %.6f, fps: %4.2f, dropped: %lli, avg_frametime: %lli, dram: %i, avg_cputime: %lli, avg_vdptime: %lli",
+          cpu_mhz, frames / (elapsed / 1000000), dropped_frames, frame_time / frames, heap_caps_get_free_size(MALLOC_CAP_8BIT | MALLOC_CAP_DMA), cpu_time / frames, vdp_time / frames);
       } else {
         set_overscan_border(current_overscan_color);
 
-        ESP_LOGI(TAG, "cpu_mhz: %.6f, fps: %lli, dropped: %lli, avg_frametime: %lli, avg_cputime: %lli, avg_vdptime: %lli, vdp_enabled: %lli, vdp_disabled: %lli, cpal_updates: %lli",
-          cpu_mhz, frames, dropped_frames, frame_time / frames, cpu_time / frames, vdp_time / frames, vdp_display_enabled, vdp_display_disabled, cpal_updates);
+        ESP_LOGI(TAG, "cpu_mhz: %.6f, fps: %4.2f, dropped: %lli, avg_frametime: %lli, dram: %i, avg_cputime: %lli, avg_vdptime: %lli",
+          cpu_mhz, frames / (elapsed / 1000000), dropped_frames, frame_time / frames, heap_caps_get_free_size(MALLOC_CAP_8BIT | MALLOC_CAP_DMA), cpu_time / frames, vdp_time / frames);
       }
 
       frames = 0;
@@ -409,9 +416,7 @@ void main_loop() {
       cpu_time = 0;
       vdp_time = 0;
 
-      vdp_display_enabled = 0;
-      vdp_display_disabled = 0;
-      cpal_updates = 0;
+      frame_intervals = 0;
 
       start = esp_timer_get_time();
     }

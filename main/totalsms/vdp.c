@@ -376,7 +376,6 @@ FORCE_INLINE void vdp_update_color(const uint16_t pattern_index)
 {
 }
 
-uint64_t cpal_updates = 0;
 FORCE_INLINE struct CachedPalette vdp_get_palette(const uint16_t pattern_index)
 {
     struct CachedPalette* cpal = &VDP.cached_palette[pattern_index >> 2];
@@ -385,7 +384,6 @@ FORCE_INLINE struct CachedPalette vdp_get_palette(const uint16_t pattern_index)
     if UNLIKELY(VDP.dirty_vram[pattern_index >> 2])
     {
         VDP.dirty_vram[pattern_index >> 2] = false;
-        ++cpal_updates;
 
         const uint8_t bit_plane0 = VDP.vram[pattern_index + 0];
         const uint8_t bit_plane1 = VDP.vram[pattern_index + 1];
@@ -1030,8 +1028,6 @@ void render_half_frame() {
   }
 }
 
-uint64_t vdp_display_enabled = 0;
-uint64_t vdp_display_disabled = 0;
 void vdp_render_frame()
 {
     // only render if display is enabled
@@ -1042,10 +1038,8 @@ void vdp_render_frame()
         {
             vdp_parse_sprites();
         }
-        ++vdp_display_disabled;
         return;
     }
-    ++vdp_display_enabled;
 
     // exit early if we have no pixels (this will break games that need sprite overflow and collision)
     if (!sms.pixels || sms.skip_frame)

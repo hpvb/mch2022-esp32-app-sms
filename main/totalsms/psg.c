@@ -7,6 +7,7 @@
 #include <string.h>
 #include <stdatomic.h>
 
+#include "esp_heap_caps.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
@@ -26,6 +27,9 @@ void psg_run(const uint8_t cycles) {}
 #else
 
 static TaskHandle_t psg_task_handle = NULL;
+static uint8_t* psg_queue_storage = NULL;
+static StaticQueue_t psg_queue_static;
+static QueueHandle_t psg_queue;
 
 enum
 {
@@ -102,17 +106,9 @@ static FORCE_INLINE void data_reg_write(const uint8_t value)
 void FORCE_INLINE psg_reg_write(const uint8_t value)
 {
     psg_sync();
-
-    // if MSB is set, then this is a latched write, else its a normal data write
-
-    // TMM: This is a little racey but it seems to work itself out in payroll
-    if (value & 0x80)
-    {
-        latch_reg_write(value);
-    }
-    else
-    {
-        data_reg_write(value);
+    //xQueueSend(psg_queue, &value, portMAX_DELAY);
+    if (xQueueSend(psg_queue, &value, 0) == errQUEUE_FULL) {
+        ESP_LOGW(TAG, "Dropping PSG reg write");
     }
 }
 
@@ -209,11 +205,24 @@ void _psg_sync()
     // psg is 16x slower than the cpu, so, it only makes sense to tick
     // each component at every 16 step.
     enum { STEP = 16 };
+    uint8_t reg_write;
 
-    uint32_t cycles = atomic_load(&PSG.cycles);
     // this loop will *not* cause PSG.cycles to underflow!
-    for (; STEP <= cycles; cycles -= STEP)
+    for (; STEP <= atomic_load(&PSG.cycles); atomic_fetch_sub_explicit(&PSG.cycles, STEP, memory_order_relaxed))
     {
+        if (xQueueReceive(psg_queue, &reg_write, 0) == true)
+        {
+            // if MSB is set, then this is a latched write, else its a normal data write
+            if (reg_write & 0x80)
+            {
+                latch_reg_write(reg_write);
+            }
+            else
+            {
+                data_reg_write(reg_write);
+            }
+        }
+
         tick_tone(0, STEP);
         tick_tone(1, STEP);
         tick_tone(2, STEP);
@@ -241,8 +250,6 @@ void _psg_sync()
             core_apu_callback(sms.userdata, &data);
         }
     }
-    
-    atomic_fetch_sub_explicit(&PSG.cycles, cycles, memory_order_relaxed);
 }
 
 // this is called on psg_reg_write() and at the end of a frame
@@ -287,5 +294,7 @@ void psg_init()
     {
         ESP_LOGI(TAG, "Starting PSG thread");
         xTaskCreatePinnedToCore(&psg_task, "psg_task", 1024, NULL, 5, &psg_task_handle, 0);
+        psg_queue_storage = heap_caps_malloc(1024, MALLOC_CAP_SPIRAM);
+        psg_queue = xQueueCreateStatic(1024, sizeof(uint8_t), psg_queue_storage, &psg_queue_static);
     }
 }
