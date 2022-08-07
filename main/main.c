@@ -38,7 +38,7 @@ SOFTWARE.
 extern const uint8_t rom_start[] asm("_binary_rom_sms_start");
 extern const uint8_t rom_end[] asm("_binary_rom_sms_end");
 
-static bool current_backbuffer = 0;
+static bool current_video_backbuffer = 0;
 videobuffer_t* backbuffer[2];
 
 #define OVERSCAN_BUFFER_SIZE 1024
@@ -57,6 +57,7 @@ extern uint64_t cpal_updates;
 
 static xQueueHandle button_queue;
 static QueueHandle_t video_queue;
+static SemaphoreHandle_t video_mutex;
 
 ILI9341 *ili9341 = NULL;
 ICE40 *ice40 = NULL;
@@ -85,9 +86,8 @@ __attribute__((always_inline)) inline uint32_t core_colour_callback(void *user, 
   return __builtin_bswap16((((r & 0xF8) << 8) + ((g & 0xFC) << 3) + ((b & 0xF8) >> 3)));
 }
 
-volatile bool currently_drawing;
 __attribute__((always_inline)) inline static void write_frame(bool frame) {
-  currently_drawing = true;
+  xSemaphoreTake(video_mutex, portMAX_DELAY);
 
   uint64_t start = esp_timer_get_time();
   uint64_t end;
@@ -96,7 +96,7 @@ __attribute__((always_inline)) inline static void write_frame(bool frame) {
     ice40_lcd_send_turbo(ice40, ((uint8_t*)backbuffer[frame]->parts[i]) - 1, backbuffer[frame]->part_size + 1);
   }
 
-  currently_drawing = false;
+  xSemaphoreGive(video_mutex);
   ++frames;
 
   end = esp_timer_get_time();
@@ -105,17 +105,15 @@ __attribute__((always_inline)) inline static void write_frame(bool frame) {
 }
 
 __attribute__((always_inline)) inline void core_vblank_callback(void *user) {
-  while (currently_drawing) { }
-
-  if (xQueueSend(video_queue, &current_backbuffer, 5) == errQUEUE_FULL) {
+  if (xQueueSend(video_queue, &current_video_backbuffer, portMAX_DELAY) == errQUEUE_FULL) {
     ++dropped_frames;
   }
 
-  current_backbuffer = !current_backbuffer;
-  sms.pixels = backbuffer[current_backbuffer];
+  current_video_backbuffer = !current_video_backbuffer;
+  sms.pixels = backbuffer[current_video_backbuffer];
 }
 
-void videoTask(void *arg) {
+void video_task(void *arg) {
   bool param;
   while (1) {
     xQueuePeek(video_queue, &param, portMAX_DELAY);
@@ -175,7 +173,7 @@ static void handle_input() {
   } while (queueResult == pdTRUE);
 }
 
-#define AUDIO_FREQ 11200
+#define AUDIO_FREQ 22000
 #define AUDIO_BLOCK_SIZE 256
 static uint16_t* audio_buffer;
 static uint32_t audio_idx = 0;
@@ -187,7 +185,7 @@ void audio_init() {
       .bits_per_sample      = I2S_BITS_PER_SAMPLE_16BIT,
       .channel_format       = I2S_CHANNEL_FMT_RIGHT_LEFT,
       .communication_format = I2S_COMM_FORMAT_STAND_MSB,
-      .dma_buf_count        = 8,
+      .dma_buf_count        = 4,
       .dma_buf_len          = AUDIO_BLOCK_SIZE / 4,
       .intr_alloc_flags     = 0,
       .use_apll             = true,
@@ -207,23 +205,23 @@ void audio_init() {
     i2s_set_pin(0, &pin_config);
     i2s_set_sample_rates(0, AUDIO_FREQ);
 
-    audio_buffer = malloc(AUDIO_BLOCK_SIZE * sizeof(uint16_t));
+    audio_buffer = heap_caps_malloc(AUDIO_BLOCK_SIZE * sizeof(uint16_t), MALLOC_CAP_SPIRAM);
+    if (!audio_buffer) {
+        ESP_LOGE(TAG, "Failed to allocate audio buffer");
+    }
     ESP_LOGI(TAG, "Audio initialized!");
 }
 
 __attribute__((always_inline)) inline void core_apu_callback(void* user, struct SMS_ApuCallbackData* data) {
+  size_t count;
   uint16_t sample = (data->tone0 + data->tone1 + data->tone2 + data->noise) * 128;
   audio_buffer[audio_idx++] = sample;
   audio_buffer[audio_idx++] = sample;
 
   if (audio_idx >= AUDIO_BLOCK_SIZE) {
-    size_t count;
-    
     i2s_write(0, audio_buffer, AUDIO_BLOCK_SIZE * 2, &count, portMAX_DELAY);
     audio_idx = 0;
   }
-
-  return;
 }
 
 static uint8_t leds[5][3];
@@ -267,15 +265,19 @@ void init_screen_rect() {
 
 #define MIN(x, y) (((x) < (y)) ? (x) : (y))
 __attribute__((always_inline)) inline void write_screen(uint8_t* buffer, size_t size) {
-  for(int i = 0; i < (size / OVERSCAN_BUFFER_SIZE) + 1; ++i) {
-    size_t length = MIN(OVERSCAN_BUFFER_SIZE, size - (i * OVERSCAN_BUFFER_SIZE));
-    if (length) ice40_lcd_send_turbo(ice40, buffer, length + 1);
+  while(1) {
+    if (!size) break;
+
+    size_t length = MIN(OVERSCAN_BUFFER_SIZE, size);
+    ice40_lcd_send_turbo(ice40, buffer, length + 1);
+    size -= length;
   }
 }
 
 void set_overscan_border(uint16_t color) {
   // Don't try to interleave this with regular frame data, bad things will happen
-  while (currently_drawing) {}
+
+  xSemaphoreTake(video_mutex, portMAX_DELAY);
 
   overscan_buffer[0] = 0xf3;
   for (uint32_t i = 1; i < OVERSCAN_BUFFER_SIZE + 1; i += 2) {
@@ -318,6 +320,7 @@ void set_overscan_border(uint16_t color) {
   write_screen(overscan_buffer, rightside);
 
   init_screen_rect();
+  xSemaphoreGive(video_mutex);
 }
 
 static void available_ram(const char *context) {
@@ -329,6 +332,8 @@ static void available_ram(const char *context) {
 }
 
 void main_loop() {
+  TickType_t xLastWakeTime = xTaskGetTickCount ();
+
   uint64_t start = esp_timer_get_time();
   uint64_t end;
 
@@ -363,6 +368,7 @@ void main_loop() {
     }
     
     psg_sync();
+    vTaskDelayUntil(&xLastWakeTime, 2);
 
     current_overscan_color = sms.vdp.colour[16 + (sms.vdp.registers[0x7] & 0xF)];
     if (overscan_color != current_overscan_color) {
@@ -409,6 +415,14 @@ void main_loop() {
 
       start = esp_timer_get_time();
     }
+  }
+}
+
+void ping_task() {
+  TickType_t xLastWakeTime = xTaskGetTickCount ();
+  while(1) {
+    xTaskDelayUntil(&xLastWakeTime, 120);
+    ESP_LOGI(TAG, "Alive and well");
   }
 }
 
@@ -479,8 +493,11 @@ void app_main() {
 
   ESP_LOGI(TAG, "Starting video thread");
   video_queue = xQueueCreate(1, sizeof(uint16_t *));
-  xTaskCreatePinnedToCore(&videoTask, "video_task", 2048, NULL, 5, NULL, 0);
+  video_mutex = xSemaphoreCreateMutex();
+  xTaskCreatePinnedToCore(&video_task, "video_task", 2048, NULL, 5, NULL, 0);
   available_ram("video_task");
+
+  //xTaskCreatePinnedToCore(&ping_task, "ping_task", 2048, NULL, 5, NULL, 0);
 
   SMS_set_colour_callback(core_colour_callback);
   SMS_set_vblank_callback(core_vblank_callback);

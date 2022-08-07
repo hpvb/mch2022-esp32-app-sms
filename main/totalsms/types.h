@@ -20,6 +20,7 @@ extern "C" {
 #include <stdint.h>
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdatomic.h>
 
 #include "videobuffer.h"
 #include "esp_attr.h"
@@ -351,7 +352,7 @@ struct SMS_ApuCallbackData
 
 struct SMS_Psg
 {
-    uint32_t cycles; // elapsed cycles since last psg_sync()
+    atomic_uint_fast32_t cycles; // elapsed cycles since last psg_sync()
 
     struct
     {

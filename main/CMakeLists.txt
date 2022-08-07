@@ -22,7 +22,9 @@ idf_component_register(
 )
 
 target_compile_options(${COMPONENT_LIB} PRIVATE
-    -Ofast
+    -O3
+    -Wall
+    -Wextra
     -fjump-tables
     -ftree-switch-conversion
     -ftree-loop-im

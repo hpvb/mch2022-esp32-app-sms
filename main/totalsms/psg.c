@@ -5,6 +5,11 @@
 #include "internal.h"
 #include <stdint.h>
 #include <string.h>
+#include <stdatomic.h>
+
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "freertos/queue.h"
 
 extern struct SMS_Core sms;
 
@@ -19,6 +24,8 @@ void psg_sync() {}
 void psg_run(const uint8_t cycles) {}
 
 #else
+
+static TaskHandle_t psg_task_handle = NULL;
 
 enum
 {
@@ -97,6 +104,8 @@ void FORCE_INLINE psg_reg_write(const uint8_t value)
     psg_sync();
 
     // if MSB is set, then this is a latched write, else its a normal data write
+
+    // TMM: This is a little racey but it seems to work itself out in payroll
     if (value & 0x80)
     {
         latch_reg_write(value);
@@ -195,22 +204,15 @@ static FORCE_INLINE uint8_t sample_channel(const uint8_t index)
     return PSG.polarity[index] * (0xF - PSG.volume[index]);
 }
 
-// this is called on psg_reg_write() and at the end of a frame
-void psg_sync()
+void _psg_sync()
 {
-    // psg regs cannot be read, so no point ticking stuff
-    // if we don't have callback for samples to be pushed
-    if (!sms.apu_callback)
-    {
-        return;
-    }
-
     // psg is 16x slower than the cpu, so, it only makes sense to tick
     // each component at every 16 step.
     enum { STEP = 16 };
 
+    uint32_t cycles = atomic_load(&PSG.cycles);
     // this loop will *not* cause PSG.cycles to underflow!
-    for (; STEP <= PSG.cycles; PSG.cycles -= STEP)
+    for (; STEP <= cycles; cycles -= STEP)
     {
         tick_tone(0, STEP);
         tick_tone(1, STEP);
@@ -239,11 +241,28 @@ void psg_sync()
             core_apu_callback(sms.userdata, &data);
         }
     }
+    
+    atomic_fetch_sub_explicit(&PSG.cycles, cycles, memory_order_relaxed);
+}
+
+// this is called on psg_reg_write() and at the end of a frame
+void psg_sync()
+{
+    xTaskNotifyGive(psg_task_handle);
+}
+
+void psg_task()
+{
+    while(1) {
+        ulTaskNotifyTake(true, portMAX_DELAY);
+        _psg_sync();
+    }
 }
 
 void psg_run(const uint8_t cycles)
 {
-    PSG.cycles += cycles; // PSG.cycles is an uint32_t, so it won't overflow
+    atomic_fetch_add_explicit(&PSG.cycles, cycles, memory_order_relaxed);
+    // PSG.cycles += cycles; // PSG.cycles is an uint32_t, so it won't overflow
 }
 
 #endif // SMS_DISBALE_AUDIO
@@ -263,4 +282,10 @@ void psg_init()
     PSG.noise.flip_flop = true;
 
     PSG.latched_channel = 0;
+
+    if (!psg_task_handle)
+    {
+        ESP_LOGI(TAG, "Starting PSG thread");
+        xTaskCreatePinnedToCore(&psg_task, "psg_task", 1024, NULL, 5, &psg_task_handle, 0);
+    }
 }
