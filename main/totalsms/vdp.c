@@ -1050,11 +1050,14 @@ void vdp_render_frame()
     struct PriorityBuf prio = {0};
     //pixel_width_t scanline[SMS_SCREEN_WIDTH] = {0};
     //pixel_width_t* scanline = ((uint16_t*)sms.pixels) + (sms.pitch * VDP.vcount) + ((ILI9341_WIDTH - SMS_SCREEN_WIDTH) / 2) + ((((ILI9341_HEIGHT - SMS_SCREEN_HEIGHT) / 2) * sms.pitch));
-    videobuffer_t* buffer = sms.pixels;
+    videobuffer_t* backbuffer = sms.pixels;
 
-    uint16_t current_part = vcount / buffer->lines_per_part;
-    pixel_width_t* part = (pixel_width_t*)buffer->parts[current_part];
-    uint16_t current_line = vcount - (current_part * buffer->lines_per_part);
+    uint16_t current_frame_part = vcount / backbuffer->lines_per_part;
+    uint16_t current_part = (backbuffer->writer_offset + (current_frame_part)) % backbuffer->part_numb;
+    //printf("rendering to part: %i because: (%i + (%i / %i)) %% %i \n", current_part, backbuffer->writer_offset, vcount, backbuffer->lines_per_part, backbuffer->part_numb);
+
+    pixel_width_t* part = (pixel_width_t*)backbuffer->parts[current_part];
+    uint16_t current_line = vcount - (current_frame_part * backbuffer->lines_per_part);
 
     pixel_width_t* scanline = part + (current_line * sms.pitch);
 
@@ -1124,7 +1127,10 @@ static void vdp_tick()
         SMS_skip_frame(false);
         VDP.frame_interrupt_pending = true;
 
+        videobuffer_t* backbuffer = sms.pixels;
         core_vblank_callback(sms.userdata);
+
+        backbuffer->writer_offset = (backbuffer->writer_offset + backbuffer->parts_per_frame) % backbuffer->part_numb;
     }
 
     if (VDP.vcount == 193 && SMS_is_spiderman_int_hack_enabled() && vdp_is_vblank_irq_wanted()) // hack for spiderman, will remove soon

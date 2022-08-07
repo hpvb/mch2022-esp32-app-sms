@@ -35,17 +35,20 @@ SOFTWARE.
 #undef TAG
 #define TAG "videobuffer"
 
-videobuffer_t* videobuffer_allocate(uint16_t width, uint16_t height, short part_numb) {
+videobuffer_t* videobuffer_allocate(uint16_t width, uint16_t height, uint16_t part_numb, uint16_t extra_parts) {
     videobuffer_t* buffer = malloc(sizeof(videobuffer_t));
     buffer->size = width * height * 2;
 
     buffer->part_size = buffer->size / part_numb;
     buffer->lines_per_part = buffer->part_size / (width * 2);
-    buffer->part_numb = part_numb;
-    buffer->real_parts = heap_caps_malloc(part_numb * sizeof(void*), MALLOC_CAP_DMA | MALLOC_CAP_8BIT);
-    buffer->parts = heap_caps_malloc(part_numb * sizeof(void*), MALLOC_CAP_DMA | MALLOC_CAP_8BIT);
+    buffer->part_numb = part_numb + extra_parts;
+    buffer->parts_per_frame = part_numb;
+    buffer->writer_offset = 0;
 
-    for (int i = 0; i < part_numb; ++i) {
+    buffer->real_parts = heap_caps_malloc(buffer->part_numb * sizeof(void*), MALLOC_CAP_DMA | MALLOC_CAP_8BIT);
+    buffer->parts = heap_caps_malloc(buffer->part_numb * sizeof(void*), MALLOC_CAP_DMA | MALLOC_CAP_8BIT);
+
+    for (int i = 0; i < buffer->part_numb; ++i) {
         buffer->real_parts[i] = heap_caps_calloc(buffer->part_size + 1, 1, MALLOC_CAP_DMA | MALLOC_CAP_8BIT);
         if (!buffer->real_parts[i])
            ESP_LOGE(TAG, "Failed to allocate buffer part %i!\n", i);

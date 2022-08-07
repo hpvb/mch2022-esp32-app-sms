@@ -38,8 +38,7 @@ SOFTWARE.
 extern const uint8_t rom_start[] asm("_binary_rom_sms_start");
 extern const uint8_t rom_end[] asm("_binary_rom_sms_end");
 
-static bool current_video_backbuffer = 0;
-videobuffer_t* backbuffer[2];
+videobuffer_t* backbuffer;
 
 #define OVERSCAN_BUFFER_SIZE 1024
 static uint8_t *overscan_buffer = NULL;
@@ -82,14 +81,14 @@ __attribute__((always_inline)) inline uint32_t core_colour_callback(void *user, 
   return __builtin_bswap16((((r & 0xF8) << 8) + ((g & 0xFC) << 3) + ((b & 0xF8) >> 3)));
 }
 
-__attribute__((always_inline)) inline static void write_frame(bool frame) {
+__attribute__((always_inline)) inline static void write_frame(uint8_t offset) {
   xSemaphoreTake(video_mutex, portMAX_DELAY);
 
   uint64_t start = esp_timer_get_time();
   uint64_t end;
 
-  for(int i = 0; i < backbuffer[frame]->part_numb; ++i) {
-    ice40_lcd_send_turbo(ice40, ((uint8_t*)backbuffer[frame]->parts[i]) - 1, backbuffer[frame]->part_size + 1);
+  for(int i = 0; i < backbuffer->parts_per_frame; ++i) {
+    ice40_lcd_send_turbo(ice40, backbuffer->real_parts[(i + offset) % backbuffer->part_numb], backbuffer->part_size + 1);
   }
 
   xSemaphoreGive(video_mutex);
@@ -101,20 +100,17 @@ __attribute__((always_inline)) inline static void write_frame(bool frame) {
 }
 
 __attribute__((always_inline)) inline void core_vblank_callback(void *user) {
-  if (xQueueSend(video_queue, &current_video_backbuffer, portMAX_DELAY) == errQUEUE_FULL) {
+  if (xQueueSend(video_queue, &backbuffer->writer_offset, portMAX_DELAY) == errQUEUE_FULL) {
     ++dropped_frames;
   }
-
-  current_video_backbuffer = !current_video_backbuffer;
-  sms.pixels = backbuffer[current_video_backbuffer];
 }
 
 void video_task(void *arg) {
-  bool param;
   while (1) {
-    xQueuePeek(video_queue, &param, portMAX_DELAY);
-    write_frame(param);
-    xQueueReceive(video_queue, &param, portMAX_DELAY);
+    uint8_t offset;
+    xQueuePeek(video_queue, &offset, portMAX_DELAY);
+    write_frame(offset);
+    xQueueReceive(video_queue, &offset, portMAX_DELAY);
   }
   vTaskDelete(NULL);
 }
@@ -497,7 +493,7 @@ void app_main() {
   available_ram("SMS_init");
 
   ESP_LOGI(TAG, "Starting video thread");
-  video_queue = xQueueCreate(1, sizeof(uint16_t *));
+  video_queue = xQueueCreate(1, sizeof(uint8_t));
   video_mutex = xSemaphoreCreateMutex();
   xTaskCreatePinnedToCore(&video_task, "video_task", 2048, NULL, 5, NULL, 0);
   available_ram("video_task");
@@ -509,11 +505,11 @@ void app_main() {
   SMS_set_apu_callback(core_apu_callback, AUDIO_FREQ);
 
   size_t screen_size = SMS_SCREEN_WIDTH * SMS_SCREEN_HEIGHT * 2;
-  backbuffer[0] = videobuffer_allocate(SMS_SCREEN_WIDTH, SMS_SCREEN_HEIGHT, screen_size / 4096);
-  backbuffer[1] = videobuffer_allocate(SMS_SCREEN_WIDTH, SMS_SCREEN_HEIGHT, screen_size / 4096);
+  uint8_t parts = screen_size / 6144;
+  backbuffer = videobuffer_allocate(SMS_SCREEN_WIDTH, SMS_SCREEN_HEIGHT, parts, parts / 2);
   available_ram("backbuffer");
 
-  SMS_set_pixels(backbuffer[0], SMS_SCREEN_WIDTH, 2);
+  SMS_set_pixels(backbuffer, SMS_SCREEN_WIDTH, 2);
 
   size_t rom_size = rom_end - rom_start;
   uint8_t* rom = heap_caps_malloc(rom_size, MALLOC_CAP_SPIRAM);
