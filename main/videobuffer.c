@@ -28,6 +28,7 @@ SOFTWARE.
 #include <stdio.h>
 
 #include "esp_log.h"
+#include "esp_heap_caps.h"
 
 #include "videobuffer.h"
 
@@ -41,11 +42,11 @@ videobuffer_t* videobuffer_allocate(uint16_t width, uint16_t height, short part_
     buffer->part_size = buffer->size / part_numb;
     buffer->lines_per_part = buffer->part_size / (width * 2);
     buffer->part_numb = part_numb;
-    buffer->real_parts = malloc(part_numb * sizeof(void*));
-    buffer->parts = malloc(part_numb * sizeof(void*));
+    buffer->real_parts = heap_caps_malloc(part_numb * sizeof(void*), MALLOC_CAP_DMA | MALLOC_CAP_8BIT);
+    buffer->parts = heap_caps_malloc(part_numb * sizeof(void*), MALLOC_CAP_DMA | MALLOC_CAP_8BIT);
 
     for (int i = 0; i < part_numb; ++i) {
-        buffer->real_parts[i] = calloc(buffer->part_size + 1, 1);
+        buffer->real_parts[i] = heap_caps_calloc(buffer->part_size + 1, 1, MALLOC_CAP_DMA | MALLOC_CAP_8BIT);
         if (!buffer->real_parts[i])
            ESP_LOGE(TAG, "Failed to allocate buffer part %i!\n", i);
         buffer->real_parts[i][0] = 0xf3;
@@ -53,4 +54,14 @@ videobuffer_t* videobuffer_allocate(uint16_t width, uint16_t height, short part_
     }
 
     return buffer;
+}
+
+void videobuffer_deallocate(videobuffer_t* buffer) {
+    for (int i = 0; i < buffer->part_numb; ++i) {
+        free(buffer->real_parts[i]);
+    }
+
+    free(buffer->real_parts);
+    free(buffer->parts);
+    free(buffer);
 }

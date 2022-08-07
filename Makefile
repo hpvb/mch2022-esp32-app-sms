@@ -31,3 +31,6 @@ menuconfig:
 
 size:
 	source "$(IDF_PATH)/export.sh" && idf.py size
+
+size-files:
+	source "$(IDF_PATH)/export.sh" && idf.py size-files

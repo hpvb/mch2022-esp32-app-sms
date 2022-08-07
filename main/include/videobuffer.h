@@ -11,3 +11,4 @@ typedef struct videobuffer {
 } videobuffer_t;
 
 videobuffer_t* videobuffer_allocate(uint16_t width, uint16_t height, short part_numb);
+void videobuffer_deallocate(videobuffer_t* buffer);
