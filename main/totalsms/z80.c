@@ -249,7 +249,6 @@ static FORCE_INLINE void set_r8(const uint8_t value, const uint8_t idx)
         case 0x5: REG_L = value; break;
         case 0x6: write8(REG_HL, value); break;
         case 0x7: REG_A = value; break;
-        default: __builtin_unreachable();
     }
 }
 
@@ -275,7 +274,6 @@ static FORCE_INLINE void set_r16(uint16_t value, const uint8_t idx)
         case 0x1: SET_REG_DE(value); break;
         case 0x2: SET_REG_HL(value); break;
         case 0x3: REG_SP = value; break;
-        default: __builtin_unreachable();
     }
 }
 
@@ -1516,7 +1514,6 @@ __attribute__((noinline)) static void execute_CB_IXIY(uint16_t ixy)
             case 0x5: REG_L = result; break;
             case 0x6: write8(addr, result); break;
             case 0x7: REG_A = result; break;
-            default: __builtin_unreachable();
         }
 
         sms.cpu.cycles += 23;

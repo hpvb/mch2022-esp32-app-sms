@@ -313,7 +313,6 @@ void mapper_update()
         case MAPPER_TYPE_OTHELLO:
             setup_mapper_othello();
             break;
-        default: __builtin_unreachable();
     }
 
     // map the bios is enabled (if we have it)
@@ -410,7 +409,6 @@ static void sega_mapper_fffx_write(const uint16_t addr, const uint8_t value)
                 sega_mapper_update_slot2();
             }
             break;
-        default: __builtin_unreachable();
     }
 }
 
@@ -463,7 +461,6 @@ void FORCE_INLINE SMS_write8(const uint16_t addr, const uint8_t value)
         case MAPPER_TYPE_THE_CASTLE:
         case MAPPER_TYPE_OTHELLO:
             break;
-        default: __builtin_unreachable();
     }
 
     assert(sms.wmap[addr >> 10] && "NULL ptr in wmap!");
@@ -655,7 +652,6 @@ static void IO_vdp_data_write(const uint8_t value)
 
             sms.vdp.addr = (sms.vdp.addr + 1) & 0x3FFF;
             break;
-        default: __builtin_unreachable();
     }
 }
 
@@ -687,7 +683,6 @@ static void IO_vdp_control_write(const uint8_t value)
             case VDP_CODE_CRAM_WRITE:
                 sms.vdp.addr = sms.vdp.control_word & 0x3FFF;
                 break;
-            default: __builtin_unreachable(); 
         }
     }
     else
@@ -925,6 +920,5 @@ void SMS_write_io(const uint8_t addr, const uint8_t value)
         case 0xB9: case 0xBB: case 0xBD: case 0xBF:
             IO_vdp_control_write(value);
              break;
-        default: __builtin_unreachable();
     }
 }
